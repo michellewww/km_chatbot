@@ -194,4 +194,4 @@ cython_debug/
 .cursorindexingignore
 
 files
-chroma_store
+# chroma_store

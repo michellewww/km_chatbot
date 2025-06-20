@@ -193,5 +193,7 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
-files
+# files
 # chroma_store
+
+.DS_Store

@@ -21,6 +21,38 @@ USE_OPENAI = False  # Set to True to use OpenAI, False for local Ollama
 st.title("K&M Project Knowledge Assistant")
 st.caption("Powered by comprehensive project database and website content")
 
+# ---- NEW: Button Mode Selection ----
+if 'mode' not in st.session_state:
+    st.session_state['mode'] = 'search'  # Default to search
+
+# Create 3 buttons above the text box
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    if st.button("General", key="general_btn", 
+                 type="primary" if st.session_state['mode'] == 'general' else "secondary",
+                 use_container_width=True):
+        st.session_state['mode'] = 'general'
+        st.rerun()
+
+with col2:
+    if st.button("Search", key="search_btn", 
+                 type="primary" if st.session_state['mode'] == 'search' else "secondary",
+                 use_container_width=True):
+        st.session_state['mode'] = 'search'
+        st.rerun()
+
+with col3:
+    if st.button("CV", key="cv_btn", 
+                 type="primary" if st.session_state['mode'] == 'cv' else "secondary",
+                 use_container_width=True):
+        st.session_state['mode'] = 'cv'
+        st.rerun()
+
+# Show current mode
+st.markdown(f"**Current Mode:** {st.session_state['mode'].title()}")
+st.markdown("---")
+
 # ---- Enhanced Project Lookup Functions with Complete Country List ----
 
 # Complete list of all countries from your images
@@ -660,6 +692,7 @@ def intelligent_project_search_v2(query: str, projects: List[Dict]) -> tuple:
             search_results = [p for p in search_results if p in client_results]
             search_method = "location + technical + client"
     
+
     elif detected['sectors'] or detected['technologies'] or detected['services']:
         # Technical-focused search
         technical_terms = detected['sectors'] + detected['technologies'] + detected['services']
@@ -1139,7 +1172,7 @@ def format_search_summary(search_criteria: Dict, num_results: int) -> str:
     
     return "\n".join(summary)
 
-# ---- Rest of your existing code with modifications ----
+# ---- NEW: Website Content Processing and LLM Setup ----
 
 @st.cache_data
 def load_website_content():
@@ -1163,7 +1196,85 @@ def load_project_data():
         st.error(f"Error loading project data: {e}")
         return None
 
-# Updated process_project_query function
+def setup_vectorstore():
+    """Setup vectorstore for website content"""
+    if st.session_state.get('vectorstore') is not None:
+        return st.session_state['vectorstore']
+    
+    website_content = load_website_content()
+    if not website_content:
+        return None
+    
+    # Create documents from website content
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000,
+        chunk_overlap=200,
+        length_function=len
+    )
+    
+    # Split the website content
+    chunks = text_splitter.split_text(website_content)
+    documents = [LangchainDocument(page_content=chunk) for chunk in chunks]
+    
+    # Setup embeddings and vectorstore
+    if USE_OPENAI:
+        embeddings = OpenAIEmbeddings()
+    else:
+        embeddings = OllamaEmbeddings(model="nomic-embed-text")
+    
+    # Create vectorstore
+    vectorstore = Chroma.from_documents(
+        documents=documents,
+        embedding=embeddings,
+        persist_directory=VECTORSTORE_DIR
+    )
+    
+    st.session_state['vectorstore'] = vectorstore
+    return vectorstore
+
+def setup_llm_chain():
+    """Setup the LLM chain for general queries"""
+    vectorstore = setup_vectorstore()
+    if not vectorstore:
+        return None
+    
+    # Setup LLM
+    if USE_OPENAI:
+        llm = ChatOpenAI(temperature=0, model_name="gpt-3.5-turbo")
+    else:
+        llm = ChatOllama(model="llama3", temperature=0)
+    
+    # Create custom prompt
+    custom_prompt = PromptTemplate(
+        input_variables=["context", "question", "chat_history"],
+        template="""You are an expert assistant for K&M Advisors LLC, a leading infrastructure advisory firm. 
+        Use the following context from K&M's website and your knowledge to answer questions about K&M's services, expertise, and capabilities.
+
+        Context from K&M website:
+        {context}
+
+        Chat History:
+        {chat_history}
+
+        Question: {question}
+
+        Please provide a comprehensive and professional answer based on the context provided. If the information isn't available in the context, use your general knowledge about infrastructure advisory services, but clearly indicate when you're doing so.
+
+        Answer:"""
+    )
+    
+    # Create the conversational retrieval chain
+    chain = ConversationalRetrievalChain.from_llm(
+        llm=llm,
+        retriever=vectorstore.as_retriever(search_kwargs={"k": 5}),
+        return_source_documents=True,
+        combine_docs_chain_kwargs={"prompt": custom_prompt}
+    )
+    
+    return chain
+
+# ---- UPDATED: Process Query Functions ----
+
 def process_project_query(user_input: str, projects: List[Dict], chat_history: List):
     """Process user query with intelligent project lookup and enhanced formatting"""
     
@@ -1225,10 +1336,96 @@ def process_project_query(user_input: str, projects: List[Dict], chat_history: L
         return formatted_response, search_criteria, filtered_projects
     
     else:
-        # Use existing vectorstore approach for general queries
+        # Not a project lookup query
         return None, None, None
 
-# ---- Session State and UI (keeping existing with enhancements) ----
+def process_general_query(user_input: str, projects: List[Dict], chat_history: List):
+    """Process general queries using project search first, then website content"""
+    
+    # First try project search
+    project_response, criteria, filtered_projects = process_project_query(user_input, projects, chat_history)
+    
+    if filtered_projects and len(filtered_projects) > 0:
+        # Found relevant projects - summarize them instead of listing all details
+        summary_parts = []
+        summary_parts.append(f"Based on your question, I found {len(filtered_projects)} relevant K&M projects:")
+        summary_parts.append("")
+        
+        # Group projects by key characteristics for summary
+        countries = set()
+        sectors = set()
+        services = set()
+        clients = set()
+        
+        for project in filtered_projects[:10]:  # Limit to first 10 for summary
+            if project.get('country'):
+                countries.add(project['country'])
+            if project.get('sectors'):
+                if isinstance(project['sectors'], list):
+                    sectors.update(project['sectors'])
+                else:
+                    sectors.add(project['sectors'])
+            if project.get('services'):
+                if isinstance(project['services'], list):
+                    services.update(project['services'])
+                else:
+                    services.add(project['services'])
+            if project.get('client'):
+                clients.add(project['client'])
+        
+        # Create summary
+        if countries:
+            summary_parts.append(f"**Countries:** {', '.join(sorted(countries))}")
+        if sectors:
+            summary_parts.append(f"**Sectors:** {', '.join(sorted(sectors))}")
+        if services:
+            summary_parts.append(f"**Services:** {', '.join(sorted(services))}")
+        if clients:
+            summary_parts.append(f"**Key Clients:** {', '.join(sorted(list(clients)[:5]))}")
+        
+        summary_parts.append("")
+        
+        # Add website content context
+        website_content = load_website_content()
+        if website_content:
+            summary_parts.append("**Additional Context from K&M's Services:**")
+            summary_parts.append("")
+            
+            # Extract relevant sections from website content based on query
+            query_lower = user_input.lower()
+            if any(term in query_lower for term in ['feasibility', 'study', 'assessment']):
+                summary_parts.append("K&M's **Feasibility Study** services include comprehensive technical and financial analysis, with experience across 90+ countries. We assess technology solutions, conduct site studies, and develop detailed economic models to determine project viability.")
+            elif any(term in query_lower for term in ['due diligence', 'dd']):
+                summary_parts.append("K&M provides **Due Diligence** services combining engineering expertise with financial analysis to assess infrastructure projects for investors and lenders.")
+            elif any(term in query_lower for term in ['lender', 'engineer', 'le']):
+                summary_parts.append("As **Lender's Engineer**, K&M provides independent technical oversight and monitoring services throughout project development and construction phases.")
+            else:
+                summary_parts.append("K&M offers comprehensive infrastructure advisory services including feasibility studies, due diligence, lender's engineer services, and project development support across power, water, and infrastructure sectors.")
+        
+        return "\n".join(summary_parts)
+    
+    else:
+        # No relevant projects found, use website content with LLM
+        chain = setup_llm_chain()
+        if chain:
+            try:
+                # Format chat history for the chain
+                formatted_history = [(msg[0], msg[1]) for msg in chat_history[-5:]]  # Last 5 exchanges
+                
+                result = chain({
+                    "question": user_input,
+                    "chat_history": formatted_history
+                })
+                
+                return result["answer"]
+            except Exception as e:
+                return f"I apologize, but I encountered an error processing your question: {str(e)}. Please try rephrasing your question or ask about specific K&M projects."
+        else:
+            # Fallback to basic response
+            return "I can help you with information about K&M's projects and services. Try asking about specific projects, countries, technologies, or services. For example: 'Show me renewable energy projects in Brazil' or 'What services does K&M provide?'"
+
+# ---- Session State and UI ----
+
 if 'vectorstore' not in st.session_state:
     st.session_state['vectorstore'] = None
 
@@ -1241,32 +1438,59 @@ if 'chat_history' not in st.session_state:
 if 'current_question' not in st.session_state:
     st.session_state['current_question'] = ""
 
-# Enhanced sidebar with smart lookup examples
+# Enhanced sidebar with mode-specific examples
 with st.sidebar:
-    st.subheader("💡 Smart Project Lookup Examples")
+    if st.session_state['mode'] == 'search':
+        st.subheader("💡 Smart Project Search Examples")
+        
+        # Updated examples showcasing new specialized search methods
+        lookup_examples = [
+            "Show me renewable energy projects in Brazil",
+            "Find DD projects for solar technology in India",  # Location + Technical + Service
+            "Give me LNG projects in United States",  # Location + Technical
+            "List all wind projects in China",  # Location + Technical
+            "Show me feasibility studies in MENA region",  # Region + Service
+            "Find owner's engineer projects for BESS in Germany",  # Location + Service + Technical
+            "Give me hydro projects in Philippines",  # Location + Technical
+            "Show me projects in Nigeria or Kenya",  # Multi-location
+            "Find solar projects in Morocco",  # Location + Technical
+            "List conventional energy projects in Indonesia",  # Location + Sector
+            "Show me projects in Caribbean region",  # Region
+            "Find HFO and natural gas projects in Turkey",  # Location + Technical (strict)
+            "Show me USAID renewable projects"  # Client + Technical
+        ]
+        
+        for example in lookup_examples:
+            if st.button(example, key=f"lookup_{hash(example)}", use_container_width=True):
+                st.session_state['current_question'] = example
+                st.rerun()
     
-    # Updated examples showcasing new specialized search methods
-    lookup_examples = [
-        "Show me renewable energy projects in Brazil",  # Location + Technical
-        "Find DD projects for solar technology in India",  # Location + Technical + Service
-        "Give me LNG projects in United States",  # Location + Technical
-        "List all wind projects in China",  # Location + Technical
-        "Show me feasibility studies in MENA region",  # Region + Service
-        "Find owner's engineer projects for BESS in Germany",  # Location + Service + Technical
-        "Give me hydro projects in Philippines",  # Location + Technical
-        "Show me projects in Nigeria or Kenya",  # Multi-location
-        "Find solar projects in Morocco",  # Location + Technical
-        "List water projects in Indonesia",  # Location + Sector
-        "Show me projects in Caribbean region",  # Region
-        "Find nuclear projects in Turkey",  # Location + Technical (strict)
-        "Give me World Bank projects",  # Client-focused
-        "Show me USAID renewable projects"  # Client + Technical
-    ]
+    elif st.session_state['mode'] == 'general':
+        st.subheader("💡 General Query Examples")
+        
+        general_examples = [
+            "What services does K&M provide?",
+            "Tell me about K&M's feasibility study process",
+            "What is K&M's experience in renewable energy?",
+            "How does K&M conduct due diligence?",
+            "What sectors does K&M work in?",
+            "Describe K&M's lender's engineer services",
+            "What is K&M's geographic coverage?",
+            "Tell me about K&M's project development services",
+            "What makes K&M different from other advisors?",
+            "How does K&M assess project risks?",
+            "What is K&M's approach to feasibility studies?",
+            "Tell me about K&M's water sector experience"
+        ]
+        
+        for example in general_examples:
+            if st.button(example, key=f"general_{hash(example)}", use_container_width=True):
+                st.session_state['current_question'] = example
+                st.rerun()
     
-    for example in lookup_examples:
-        if st.button(example, key=f"lookup_{hash(example)}", use_container_width=True):
-            st.session_state['current_question'] = example
-            st.rerun()
+    else:  # CV mode
+        st.subheader("💡 CV Query Examples")
+        st.info("CV functionality will be implemented soon.")
     
     st.divider()
     
@@ -1278,7 +1502,6 @@ with st.sidebar:
         st.subheader("🏢 Client Database")
         st.metric("Available Clients", len(client_list))
         
-    
     # Enhanced category reference guide with complete country list
     st.subheader("📚 Search Categories & Coverage")
     
@@ -1422,81 +1645,153 @@ with st.sidebar:
                 st.markdown(f"• {country}: {count}")
 
 # Display chat history FIRST
+# Display chat history FIRST
 for i, (user, bot) in enumerate(st.session_state['chat_history']):
     with st.container():
         st.markdown(f"**👤 User:** {user}")
         st.markdown(f"**🤖 Assistant:** {bot}")
         st.divider()
 
-# FIXED: ChatGPT-style sticky input at bottom
+# FIXED: ChatGPT-style sticky input at bottom with proper overlay
 st.markdown("""
 <style>
-/* Add bottom padding to main content to avoid overlap */
+/* Add bottom padding to main content to avoid overlap with fixed input */
 .main .block-container {
-    padding-bottom: 120px;
+    padding-bottom: 120px !important;
+}
+
+/* Fixed floating input container */
+.chat-input-container {
+    position: fixed !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    background: white !important;
+    border-top: 1px solid #e0e0e0 !important;
+    padding: 15px 20px !important;
+    z-index: 999 !important;
+    box-shadow: 0 -2px 10px rgba(0,0,0,0.1) !important;
+}
+
+/* Dark mode support */
+@media (prefers-color-scheme: dark) {
+    .chat-input-container {
+        background: #0e1117 !important;
+        border-top: 1px solid #262730 !important;
+    }
 }
 
 /* Hide default streamlit input styling */
 .stTextInput > label {
-    display: none;
+    display: none !important;
+}
+
+/* Ensure input takes full width in container */
+.chat-input-container .stTextInput {
+    margin-bottom: 0 !important;
+}
+
+/* Style the input field */
+.chat-input-container input {
+    border-radius: 25px !important;
+    border: 2px solid #e0e0e0 !important;
+    padding: 12px 20px !important;
+    font-size: 16px !important;
+}
+
+.chat-input-container input:focus {
+    border-color: #ff4b4b !important;
+    box-shadow: 0 0 0 2px rgba(255, 75, 75, 0.2) !important;
+}
+
+/* Style the send button */
+.chat-input-container .stButton button {
+    border-radius: 25px !important;
+    height: 48px !important;
+    background: #ff4b4b !important;
+    border: none !important;
+    color: white !important;
+    font-weight: 600 !important;
+}
+
+.chat-input-container .stButton button:hover {
+    background: #ff3333 !important;
+    transform: translateY(-1px) !important;
 }
 </style>
 """, unsafe_allow_html=True)
 
-# Create the sticky input container
+# Create the fixed floating input container
 st.markdown('<div class="chat-input-container">', unsafe_allow_html=True)
 
 col1, col2 = st.columns([5, 1])
 
 with col1:
+    # Dynamic placeholder based on mode
+    if st.session_state['mode'] == 'search':
+        placeholder_text = "Search K&M projects... (e.g., 'Give me LNG projects in United States')"
+    elif st.session_state['mode'] == 'general':
+        placeholder_text = "Ask about K&M's services... (e.g., 'What services does K&M provide?')"
+    else:  # CV mode
+        placeholder_text = "CV queries coming soon..."
+    
     user_input = st.text_input(
         "", 
         value=st.session_state['current_question'],
         key="kb_input", 
-        placeholder="Ask about K&M's projects... (e.g., 'Give me LNG projects in United States')",
-        label_visibility="collapsed"
+        placeholder=placeholder_text,
+        label_visibility="collapsed",
+        disabled=(st.session_state['mode'] == 'cv')  # Disable for CV mode for now
     )
 
 with col2:
-    send_button = st.button("Send", key="kb_send", use_container_width=True)
+    send_button = st.button("Send", key="kb_send", use_container_width=True, 
+                           disabled=(st.session_state['mode'] == 'cv'))
 
 st.markdown('</div>', unsafe_allow_html=True)
 
-# Process input
+
+# Process input based on mode
 if send_button and user_input.strip():
     if st.session_state['project_data']:
         projects = st.session_state['project_data'].get('projects', [])
         
-        with st.spinner("🔍 Searching project database..."):
-            # Try project lookup first
-            formatted_response, criteria, filtered_projects = process_project_query(
-                user_input, projects, st.session_state['chat_history']
-            )
-            
-            if formatted_response is not None:
-                # This is a project lookup query - use the formatted response
-                response = formatted_response
-                # Store last search criteria for debugging
-                st.session_state['last_search_criteria'] = criteria
-            else:
-                # Fall back to existing vectorstore approach
-                response = "I can help you search for specific projects. Try asking something like 'Show me projects in [country]' or 'Find LNG projects for [client]'."
+        if st.session_state['mode'] == 'search':
+            # Search mode - use project search only
+            with st.spinner("🔍 Searching project database..."):
+                formatted_response, criteria, filtered_projects = process_project_query(
+                    user_input, projects, st.session_state['chat_history']
+                )
+                
+                if formatted_response is not None:
+                    response = formatted_response
+                    st.session_state['last_search_criteria'] = criteria
+                else:
+                    response = "I can help you search for specific projects. Try asking something like 'Show me projects in [country]' or 'Find LNG projects for [client]'."
+        
+        elif st.session_state['mode'] == 'general':
+            # General mode - try project search first, then use website content
+            with st.spinner("🤔 Analyzing your question..."):
+                response = process_general_query(
+                    user_input, projects, st.session_state['chat_history']
+                )
+        
+        else:  # CV mode
+            response = "CV functionality is not yet implemented. Please switch to Search or General mode."
         
         st.session_state['chat_history'].append((user_input, response))
         st.session_state['current_question'] = ""
         st.rerun()
 
-
-# Enhanced footer
+# Enhanced footer with mode indication
 st.markdown("---")
-st.markdown("""
+st.markdown(f"""
 <div style='text-align: center; color: #666; font-size: 0.8em;'>
-    K&M Engineering & Consulting Corporation - Global Project Knowledge Assistant<br>
+    K&M Advisors LLC - Global Project Knowledge Assistant<br>
+    Current Mode: <strong>{st.session_state['mode'].title()}</strong> | 
     Enhanced with Specialized Search Methods: Location-First | Technical-First | Client-First | Combined<br>
-    <em>Intelligent search routing with 99+ countries, {} unique clients, and precise technical matching</em>
 </div>
-""".format(
-    len(generate_client_list(st.session_state['project_data'].get('projects', []))) if st.session_state['project_data'] else 0
-), unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 
 
+        

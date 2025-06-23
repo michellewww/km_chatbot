@@ -1,8 +1,3 @@
-Memo
-To	Alfonso Guzman
-From	Nick LaBriola, Bipasha Roy
-Copied to	Lenny Golbin
-Date	March 20, 2024
 Subject	How to provide peak power at 8% of the cost of a new peaking plant?
 	
 
@@ -13,11 +8,6 @@ The overall conclusion of the study is that each phase of the plant experiences 
 As the procurement of the system developed, quotes were received for the fogging system installation, and it was determined that adding the fogging system is a very cost-effective way of getting peak power as compared to the construction of a peaking plant to handle peak loads. The total cost of modifying the gas turbine air inlet with the fogging system and additional demineralized water storage and pumping equipment is approximately 8% of the total cost of a new peaking plant with minimal impact to the existing plant. As a result of this comprehensive evaluation of all relevant equipment and systems along with the cost comparison of a fogging system against a new peaking plant, K&M recommended implementation of the fogging system for all four phases of the Samra plant. 
 
 ----
-Memo
-To	Nate Travis
-From	Veronica McCarthy
-Copied to	Brad Dunn
-Date	August 31, 2020
 Subject	Sector and Service Descriptions for Website
     
 
@@ -205,14 +195,6 @@ K&M services to governments, multilateral agencies and private firms include:
 
 
 ----
-  Memo
-To	[recipients]
-
-From	[author's name]
-
-Copied to	[recipients]
-
-Date	January 6, 2021
 Subject	Website Bios- Associates and Administration
     
 
@@ -234,14 +216,6 @@ Mrs. Andrea Murcia specializes in economic, financial and institutional analysis
 As Business Operations Associate, Ms. McCarthy supports K&M through firm management, business development and strategic marketing initiatives. Prior to K&M, Ms. McCarthy worked for a senior Member of Parliament in the House of Commons, London, U.K. She was also a Government Relations Intern at In Defense of Christians and a Legislative Intern for a Member of Congress. Ms. McCarthy has a Master of Arts degree in Global Ethics and Human Values from King’s College London and a Bachelor of Arts degree in International Politics from The Catholic University of America. Ms. McCarthy can be reached at vmccarthy@km-advisorsllc.com.
 
 ----
-Memo
-To	[recipients]
-
-From	[author's name]
-
-Copied to	[recipients]
-
-Date	January 6, 2021
 Subject	Website Bios- Managers
     
 
@@ -257,14 +231,6 @@ Mr. Edwards is Senior Project Manager and Manager of Construction with over 30 y
 Mr. Mackay has over 30 years’ experience in the energy industry. He is an LNG commercial expert specializing in the business development of LNG import projects, LNG-to-Power projects and LNG procurement. He provides K&M with consulting and advisory services in LNG business development, specializing in LNG procurement and small-scale LNG and the commercial development of LNG import terminals, FSRUs and LNG-to-power projects. From 2011 to 2016, Mr. Mackay headed up commercial and business development for BW Group’s floating LNG infrastructure business, including FSRUs, FSUs and LNG supply/sourcing. During this time, he managed the bid and led commercial development of BW Group’s 5 year FSRU charter to EGAS in Egypt to successful award in August 2015 and commissioning in October 2015. Mr. Mackay joined BW Group from Gazprom in Singapore where he led their Asia Pacific LNG marketing activities. During this time, he originated, negotiated and closed Gazprom’s first structured mid-term LNG sales deal into India (7 cargoes over 2 years). Prior to Gazprom, Mr. Mackay had a 25-year career with Shell in variety of engineering, commercial and business development roles.
 
 ----
-Memo
-To	[recipients]
-
-From	[author's name]
-
-Copied to	[recipients]
-
-Date	January 6, 2021
 Subject	Website Bios-Principals
     
 

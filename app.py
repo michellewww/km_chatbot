@@ -21,37 +21,40 @@ USE_OPENAI = False  # Set to True to use OpenAI, False for local Ollama
 st.title("K&M Project Knowledge Assistant")
 st.caption("Powered by comprehensive project database and website content")
 
-# ---- NEW: Button Mode Selection ----
+# ---- MOVE: Button Mode Selection to sidebar top ----
 if 'mode' not in st.session_state:
     st.session_state['mode'] = 'search'  # Default to search
+    
+with st.sidebar:
+    st.subheader("Mode Selection")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if st.button("General", key="general_btn", 
+                    type="primary" if st.session_state['mode'] == 'general' else "secondary",
+                    use_container_width=True):
+            st.session_state['mode'] = 'general'
+            st.rerun()
+    
+    with col2:
+        if st.button("Search", key="search_btn", 
+                    type="primary" if st.session_state['mode'] == 'search' else "secondary",
+                    use_container_width=True):
+            st.session_state['mode'] = 'search'
+            st.rerun()
+    
+    with col3:
+        if st.button("CV", key="cv_btn", 
+                    type="primary" if st.session_state['mode'] == 'cv' else "secondary",
+                    use_container_width=True):
+            st.session_state['mode'] = 'cv'
+            st.rerun()
+    
+    # Show current mode
+    st.caption(f"**Current Mode:** {st.session_state['mode'].title()}")
+    st.divider()
+    
 
-# Create 3 buttons above the text box
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    if st.button("General", key="general_btn", 
-                 type="primary" if st.session_state['mode'] == 'general' else "secondary",
-                 use_container_width=True):
-        st.session_state['mode'] = 'general'
-        st.rerun()
-
-with col2:
-    if st.button("Search", key="search_btn", 
-                 type="primary" if st.session_state['mode'] == 'search' else "secondary",
-                 use_container_width=True):
-        st.session_state['mode'] = 'search'
-        st.rerun()
-
-with col3:
-    if st.button("CV", key="cv_btn", 
-                 type="primary" if st.session_state['mode'] == 'cv' else "secondary",
-                 use_container_width=True):
-        st.session_state['mode'] = 'cv'
-        st.rerun()
-
-# Show current mode
-st.markdown(f"**Current Mode:** {st.session_state['mode'].title()}")
-st.markdown("---")
 
 # ---- Enhanced Project Lookup Functions with Complete Country List ----
 
@@ -1083,8 +1086,8 @@ def format_project_details(project: Dict) -> str:
         if assignment.get('description'):
             description = assignment['description']
             # Format description nicely with proper line breaks
-            if len(description) > 400:
-                description = description[:400] + "..."
+            # if len(description) > 400:
+            #     description = description[:400] + "..."
             
             # Split long descriptions into readable chunks
             description_lines = description.replace('. ', '.\n   ').split('\n')
@@ -1092,6 +1095,7 @@ def format_project_details(project: Dict) -> str:
             for line in description_lines[:3]:  # Limit to first 3 sentences
                 if line.strip():
                     details.append(f"     {line.strip()}")
+
     
     # Additional DOCX info if available
     if project.get('docx_data'):
@@ -1240,7 +1244,7 @@ def setup_llm_chain():
     
     # Setup LLM
     if USE_OPENAI:
-        llm = ChatOpenAI(temperature=0, model_name="gpt-3.5-turbo")
+        llm = ChatOpenAI(temperature=0, model_name="gpt-4o-mini")
     else:
         llm = ChatOllama(model="llama3", temperature=0)
     

@@ -11,6 +11,7 @@ from langchain.prompts import PromptTemplate
 from langchain.schema import Document as LangchainDocument
 import re
 from typing import List, Dict, Any, Optional
+from difflib import SequenceMatcher
 
 VECTORSTORE_DIR = "./chroma_store"
 PROJECT_JSON = "./Shared/Marketing/Project Descriptions/combined_project_data.json"
@@ -250,7 +251,7 @@ KNOWN_SECTORS = {
                       'grid storage', 'utility storage'],
     'hydrogen': ['hydrogen', 'h2', 'green hydrogen', 'blue hydrogen', 'hydrogen energy', 'hydrogen power',
                 'hydrogen production', 'hydrogen economy'],
-    'lng to power': ['lng to power', 'lng power', 'lng-to-power', 'lng2power', 'lng'],  # RESTRICTED: only LNG sector terms
+    'lng to power': ['lng to power', 'lng power', 'lng-to-power', 'lng2power', 'lng'], 
     'other energy': ['other energy', 'misc energy', 'miscellaneous energy', 'mixed energy'],
     'water & wastewater': ['water & wastewater', 'water and wastewater', 'water', 'wastewater', 'ww',
                           'water treatment', 'sewage treatment', 'water infrastructure'],
@@ -270,9 +271,9 @@ KNOWN_TECHNOLOGIES = {
                    'diesel power', 'diesel engine'],
     'hfo': ['hfo', 'heavy fuel oil', 'fuel oil', 'residual fuel oil'],
     'others': ['others', 'other', 'misc', 'miscellaneous', 'mixed technology'],
-    'nuclear': ['nuclear', 'nuclear power', 'nuclear energy', 'atomic power', 'nuclear plant'],  # RESTRICTED: only nuclear technology terms
+    'nuclear': ['nuclear', 'nuclear power', 'nuclear energy', 'atomic power', 'nuclear plant'],
     'natural gas': ['natural gas', 'gas', 'ng', 'nat gas', 'gas turbine', 'gas engine', 'ccgt',
-                   'combined cycle', 'gas power', 'liquefied natural gas'],  # Added LNG as gas technology
+                   'combined cycle', 'gas power', 'liquefied natural gas'],
     'coal': ['coal', 'coal power', 'coal energy', 'coal plant', 'coal fired', 'thermal coal'],
     'green hydrogen': ['green hydrogen', 'green h2', 'renewable hydrogen', 'electrolytic hydrogen'],
     'geothermal': ['geothermal', 'geothermal energy', 'geothermal power', 'geothermal plant'],
@@ -282,7 +283,428 @@ KNOWN_TECHNOLOGIES = {
                'waste to energy', 'bagasse']
 }
 
-# ---- GLOBAL HELPER FUNCTIONS ----
+# ---- NEW: Client List Generation and Fuzzy Matching ----
+
+def generate_client_list(projects: List[Dict]) -> List[str]:
+    """Generate a comprehensive list of unique clients from the project data"""
+    clients = set()
+    
+    for project in projects:
+        # Get client from main field
+        if project.get('client'):
+            clients.add(project['client'].strip())
+        
+        # Get client from docx data
+        if project.get('docx_data', {}).get('docx_client'):
+            clients.add(project['docx_data']['docx_client'].strip())
+    
+    # Clean and filter clients
+    cleaned_clients = []
+    for client in clients:
+        if client and len(client) > 2:  # Filter out very short or empty entries
+            cleaned_clients.append(client)
+    
+    return sorted(list(set(cleaned_clients)))
+
+def fuzzy_match_clients(query_term: str, client_list: List[str], threshold: float = 0.6) -> List[str]:
+    """Fuzzy match client names using sequence matching"""
+    query_lower = query_term.lower().strip()
+    matches = []
+    
+    for client in client_list:
+        client_lower = client.lower()
+        
+        # Exact match
+        if query_lower == client_lower:
+            matches.append(client)
+            continue
+        
+        # Partial match
+        if query_lower in client_lower or client_lower in query_lower:
+            matches.append(client)
+            continue
+        
+        # Fuzzy match using sequence matcher
+        similarity = SequenceMatcher(None, query_lower, client_lower).ratio()
+        if similarity >= threshold:
+            matches.append(client)
+            continue
+        
+        # Word-level fuzzy matching
+        query_words = query_lower.split()
+        client_words = client_lower.split()
+        
+        for query_word in query_words:
+            if len(query_word) >= 3:  # Skip very short words
+                for client_word in client_words:
+                    if len(client_word) >= 3:
+                        word_similarity = SequenceMatcher(None, query_word, client_word).ratio()
+                        if word_similarity >= threshold:
+                            matches.append(client)
+                            break
+                if client in matches:
+                    break
+    
+    return list(set(matches))  # Remove duplicates
+
+# ---- SPECIALIZED SEARCH FUNCTIONS ----
+
+def country_region_search(query_terms: List[str], projects: List[Dict]) -> List[Dict]:
+    """Specialized search for country/region queries - searches only in location fields"""
+    filtered_projects = []
+    
+    for project in projects:
+        # Build location search fields
+        location_fields = []
+        
+        # Add country field
+        if project.get('country'):
+            location_fields.append(project['country'])
+        
+        # Add regions field
+        if project.get('regions'):
+            if isinstance(project['regions'], list):
+                location_fields.extend(project['regions'])
+            else:
+                location_fields.append(project['regions'])
+        
+        # Add docx location data
+        if project.get('docx_data', {}).get('docx_country'):
+            location_fields.append(project['docx_data']['docx_country'])
+        
+        # Check if any query term matches any location field
+        for query_term in query_terms:
+            for location_field in location_fields:
+                if advanced_fuzzy_match(query_term, location_field):
+                    filtered_projects.append(project)
+                    break
+            if project in filtered_projects:
+                break
+    
+    return filtered_projects
+
+def sector_technology_search(query_terms: List[str], projects: List[Dict]) -> List[Dict]:
+    """FIXED: Handle multiple sectors/technologies with strict LNG matching"""
+    filtered_projects = []
+    
+    for project in projects:
+        project_matches = False
+        
+        # For LNG searches, be VERY strict
+        if any('lng' in term.lower() for term in query_terms):
+            # Check if project has LNG to Power sector specifically
+            has_lng_sector = False
+            
+            if project.get('sectors'):
+                sectors = project['sectors'] if isinstance(project['sectors'], list) else [project['sectors']]
+                for sector in sectors:
+                    if 'lng to power' in sector.lower():
+                        has_lng_sector = True
+                        break
+            
+            # Check project name for LNG context
+            has_lng_name = False
+            if project.get('project_name'):
+                project_name = project['project_name'].lower()
+                if 'lng' in project_name:
+                    has_lng_name = True
+            
+            # Only include if project explicitly has LNG sector OR LNG in name
+            if has_lng_sector or has_lng_name:
+                project_matches = True
+        
+        else:
+            # For non-LNG searches, use broader matching
+            technical_fields = []
+            
+            # Add project name
+            if project.get('project_name'):
+                technical_fields.append(project['project_name'])
+            
+            # Add all sectors (handle array)
+            if project.get('sectors'):
+                sectors = project['sectors'] if isinstance(project['sectors'], list) else [project['sectors']]
+                technical_fields.extend(sectors)
+            
+            # Add all services (handle array)
+            if project.get('services'):
+                services = project['services'] if isinstance(project['services'], list) else [project['services']]
+                technical_fields.extend(services)
+            
+            # Add all technologies (handle complex structure)
+            if project.get('technologies'):
+                for tech in project['technologies']:
+                    if isinstance(tech, dict):
+                        if tech.get('type'):
+                            technical_fields.append(tech['type'])
+                        if tech.get('name'):
+                            technical_fields.append(tech['name'])
+                    elif isinstance(tech, str):
+                        technical_fields.append(tech)
+            
+            # Check if any query term matches any technical field
+            for query_term in query_terms:
+                for technical_field in technical_fields:
+                    if advanced_fuzzy_match(query_term, technical_field):
+                        project_matches = True
+                        break
+                if project_matches:
+                    break
+        
+        if project_matches:
+            filtered_projects.append(project)
+    
+    return filtered_projects
+
+def client_search(query_terms: List[str], projects: List[Dict], client_list: List[str]) -> List[Dict]:
+    """Specialized search for client queries - uses fuzzy matching on client list"""
+    # First, find matching clients using fuzzy search
+    matched_clients = []
+    for query_term in query_terms:
+        matched_clients.extend(fuzzy_match_clients(query_term, client_list))
+    
+    if not matched_clients:
+        return []
+    
+    # Then filter projects by matched clients
+    filtered_projects = []
+    
+    for project in projects:
+        # Build client search fields
+        client_fields = []
+        
+        if project.get('client'):
+            client_fields.append(project['client'])
+        
+        if project.get('docx_data', {}).get('docx_client'):
+            client_fields.append(project['docx_data']['docx_client'])
+        
+        # Check if any matched client appears in project client fields
+        for matched_client in matched_clients:
+            for client_field in client_fields:
+                if advanced_fuzzy_match(matched_client, client_field):
+                    filtered_projects.append(project)
+                    break
+            if project in filtered_projects:
+                break
+    
+    return filtered_projects
+
+# ---- CATEGORY DETECTION FUNCTIONS ----
+
+def detect_query_category(query: str) -> Dict[str, List[str]]:
+    """
+    Enhanced with STRICTER LNG detection
+    """
+    query_lower = query.lower()
+    words = query_lower.split()
+    
+    detected = {
+        'countries': [],
+        'regions': [],
+        'sectors': [],
+        'technologies': [],
+        'services': [],
+        'clients': [],
+        'other_terms': []
+    }
+    
+    # SPECIAL CASE: LNG detection
+    if 'lng' in query_lower:
+        detected['sectors'].append('lng to power')
+        detected['technologies'].append('natural gas')
+        # Remove 'lng' from further processing to avoid confusion
+        words = [w for w in words if w != 'lng']
+    
+    # Check for multi-word phrases first (up to 4 words)
+    for i in range(len(words)):
+        for j in range(i+1, min(i+5, len(words)+1)):
+            phrase = ' '.join(words[i:j])
+            
+            # Country detection - exact matching
+            for country_name, variations in KNOWN_COUNTRIES.items():
+                if phrase in variations:
+                    detected['countries'].append(country_name)
+                    break
+            
+            # Region detection - exact matching
+            for region_name, region_data in KNOWN_REGIONS.items():
+                if phrase in region_data['variations']:
+                    detected['regions'].append(region_name)
+                    # Also add all countries in this region
+                    detected['countries'].extend(region_data['countries'])
+                    break
+            
+            # Sector detection - strict matching
+            for sector_name, variations in KNOWN_SECTORS.items():
+                if phrase in variations:
+                    detected['sectors'].append(sector_name)
+                    break
+            
+            # Technology detection - strict matching
+            for tech_name, variations in KNOWN_TECHNOLOGIES.items():
+                if phrase in variations:
+                    detected['technologies'].append(tech_name)
+                    break
+            
+            # Service detection
+            for service_name, variations in KNOWN_SERVICES.items():
+                if phrase in variations:
+                    detected['services'].append(service_name)
+                    break
+    
+    # Check individual words
+    for word in words:
+        if len(word) <= 2:
+            continue
+        
+        # Skip if already found in phrases
+        already_found = (word in ' '.join(detected['countries']) or 
+                        word in ' '.join(detected['regions']) or
+                        word in ' '.join(detected['sectors']) or
+                        word in ' '.join(detected['technologies']) or
+                        word in ' '.join(detected['services']))
+        
+        if already_found:
+            continue
+        
+        # Country detection
+        for country_name, variations in KNOWN_COUNTRIES.items():
+            if word in variations:
+                detected['countries'].append(country_name)
+                break
+        
+        # Region detection
+        for region_name, region_data in KNOWN_REGIONS.items():
+            if word in region_data['variations']:
+                detected['regions'].append(region_name)
+                detected['countries'].extend(region_data['countries'])
+                break
+        
+        # Sector detection
+        for sector_name, variations in KNOWN_SECTORS.items():
+            if word in variations:
+                detected['sectors'].append(sector_name)
+                break
+        
+        # Technology detection
+        for tech_name, variations in KNOWN_TECHNOLOGIES.items():
+            if word in variations:
+                detected['technologies'].append(tech_name)
+                break
+        
+        # Service detection
+        for service_name, variations in KNOWN_SERVICES.items():
+            if word in variations:
+                detected['services'].append(service_name)
+                break
+        
+        # Client detection (look for uppercase words or known patterns)
+        if len(word) > 2 and (word.isupper() or word.istitle()):
+            # Common client abbreviations
+            client_mappings = {
+                'usaid': 'USAID',
+                'worldbank': 'World Bank',
+                'wb': 'World Bank',
+                'ifc': 'IFC',
+                'adb': 'Asian Development Bank',
+                'afdb': 'African Development Bank',
+                'iadb': 'Inter-American Development Bank'
+            }
+            
+            if word.lower() in client_mappings:
+                detected['clients'].append(client_mappings[word.lower()])
+            elif word not in ['Give', 'Show', 'Find', 'List', 'Projects', 'Me', 'In', 'For', 'The', 'And', 'Of', 'To']:
+                detected['clients'].append(word)
+    
+    # Remove duplicates
+    for key in detected:
+        detected[key] = list(set(detected[key]))
+    
+    return detected
+
+# ---- MAIN SEARCH ROUTING FUNCTION ----
+
+def intelligent_project_search_v2(query: str, projects: List[Dict]) -> tuple:
+    """
+    Enhanced intelligent project search with specialized routing
+    """
+    # Generate client list
+    client_list = generate_client_list(projects)
+    
+    # Detect query categories
+    detected = detect_query_category(query)
+    
+    # Determine primary search method based on detected categories
+    search_results = []
+    search_method = "combined"
+    
+    # Priority: Location > Technical > Client > Combined
+    if detected['countries'] or detected['regions']:
+        # Location-focused search
+        location_terms = detected['countries'] + detected['regions']
+        search_results = country_region_search(location_terms, projects)
+        search_method = "location"
+        
+        # If we also have technical terms, further filter by technical criteria
+        if detected['sectors'] or detected['technologies'] or detected['services']:
+            technical_terms = detected['sectors'] + detected['technologies'] + detected['services']
+            technical_results = sector_technology_search(technical_terms, projects)
+            # Intersection of location and technical results
+            search_results = [p for p in search_results if p in technical_results]
+            search_method = "location + technical"
+        
+        # If we also have client terms, further filter by client
+        if detected['clients']:
+            client_results = client_search(detected['clients'], projects, client_list)
+            search_results = [p for p in search_results if p in client_results]
+            search_method = "location + technical + client"
+    
+    elif detected['sectors'] or detected['technologies'] or detected['services']:
+        # Technical-focused search
+        technical_terms = detected['sectors'] + detected['technologies'] + detected['services']
+        search_results = sector_technology_search(technical_terms, projects)
+        search_method = "technical"
+        
+        # If we also have client terms, further filter by client
+        if detected['clients']:
+            client_results = client_search(detected['clients'], projects, client_list)
+            search_results = [p for p in search_results if p in client_results]
+            search_method = "technical + client"
+    
+    elif detected['clients']:
+        # Client-focused search
+        search_results = client_search(detected['clients'], projects, client_list)
+        search_method = "client"
+    
+    else:
+        # Fallback to original combined search
+        search_results = enhanced_project_lookup_function(
+            projects=projects,
+            country_filter=detected['countries'] if detected['countries'] else None,
+            region_filter=detected['regions'] if detected['regions'] else None,
+            service_filter=detected['services'] if detected['services'] else None,
+            sector_filter=detected['sectors'] if detected['sectors'] else None,
+            technology_filter=detected['technologies'] if detected['technologies'] else None,
+            client_filter=detected['clients'] if detected['clients'] else None,
+            other_terms_filter=detected['other_terms'] if detected['other_terms'] else None
+        )
+        search_method = "fallback"
+    # Combine criteria for display
+    all_tech_criteria = detected['services'] + detected['sectors'] + detected['technologies']
+    all_location_criteria = detected['countries'] + detected['regions']
+    
+    return search_results, {
+        'locations': all_location_criteria,
+        'technical': all_tech_criteria,
+        'clients': detected['clients'],
+        'other_terms': detected['other_terms'],
+        'search_method': search_method,
+        'detected_details': detected,
+        'available_clients': len(client_list)
+    }
+
+# ---- GLOBAL HELPER FUNCTIONS (keeping existing ones) ----
 
 def normalize_text(text: str) -> str:
     """Normalize text for comparison"""
@@ -333,189 +755,6 @@ def advanced_fuzzy_match(search_term: str, target_text: str) -> bool:
                         return True
     
     return False
-
-def normalize_and_match_categories_strict(query_term: str, category_dict: Dict[str, List[str]]) -> List[str]:
-    """
-    STRICTER matching - only exact matches or very close variations
-    """
-    query_lower = query_term.lower().strip()
-    matches = []
-    
-    for canonical_name, variations in category_dict.items():
-        for variation in variations:
-            variation_lower = variation.lower()
-            # Only exact match or very specific partial matches
-            if query_lower == variation_lower:
-                matches.append(canonical_name)
-                break
-            # Very restrictive partial matching - only for longer terms
-            elif (len(query_lower) >= 4 and len(variation_lower) >= 4 and 
-                  (query_lower in variation_lower or variation_lower in query_lower)):
-                # Additional check: ensure it's a meaningful match
-                if abs(len(query_lower) - len(variation_lower)) <= 3:
-                    matches.append(canonical_name)
-                    break
-    
-    return list(set(matches))  # Remove duplicates
-
-def normalize_and_match_categories(query_term: str, category_dict: Dict[str, List[str]]) -> List[str]:
-    """
-    Enhanced matching with better fuzzy logic and partial matching
-    """
-    query_lower = query_term.lower().strip()
-    matches = []
-    
-    for canonical_name, variations in category_dict.items():
-        for variation in variations:
-            variation_lower = variation.lower()
-            # Exact match
-            if query_lower == variation_lower:
-                matches.append(canonical_name)
-                break
-            # Partial match (query contains variation or vice versa)
-            elif query_lower in variation_lower or variation_lower in query_lower:
-                # Avoid very short partial matches unless they're exact
-                if len(query_lower) >= 3 and len(variation_lower) >= 3:
-                    matches.append(canonical_name)
-                    break
-    
-    return list(set(matches))  # Remove duplicates
-
-def map_location_to_countries_and_regions(location_term: str) -> Dict[str, List[str]]:
-    """
-    Map a location term to both specific countries and regions with stricter matching
-    """
-    location_lower = location_term.lower().strip()
-    result = {'countries': [], 'regions': []}
-    
-    # First check if it's a specific country with EXACT matching
-    for country_name, variations in KNOWN_COUNTRIES.items():
-        for variation in variations:
-            variation_lower = variation.lower()
-            # Use exact match or very close match only
-            if (location_lower == variation_lower or 
-                (len(location_lower) > 3 and len(variation_lower) > 3 and 
-                 location_lower == variation_lower)):
-                result['countries'].append(country_name)
-                break
-    
-    # Only check regions if no specific country was found
-    if not result['countries']:
-        for region_name, region_data in KNOWN_REGIONS.items():
-            region_variations = region_data['variations']
-            for variation in region_variations:
-                variation_lower = variation.lower()
-                # Exact match for regions
-                if location_lower == variation_lower:
-                    result['regions'].append(region_name)
-                    # Add all countries in this region
-                    result['countries'].extend(region_data['countries'])
-                    break
-    
-    # Remove duplicates
-    result['countries'] = list(set(result['countries']))
-    result['regions'] = list(set(result['regions']))
-    
-    return result
-
-def smart_extract_keywords_from_query(query: str) -> Dict[str, List[str]]:
-    """
-    Enhanced keyword extraction with more precise location and technical matching
-    """
-    query_lower = query.lower()
-    
-    extracted = {
-        'countries': [],
-        'regions': [],
-        'services': [],
-        'sectors': [],
-        'technologies': [],
-        'clients': [],
-        'other_terms': []
-    }
-    
-    # Split query into words and phrases
-    words = query_lower.split()
-    
-    # Check for multi-word phrases first (up to 4 words for locations)
-    for i in range(len(words)):
-        for j in range(i+1, min(i+5, len(words)+1)):
-            phrase = ' '.join(words[i:j])
-            
-            # Location mapping with stricter matching
-            location_mapping = map_location_to_countries_and_regions(phrase)
-            if location_mapping['countries'] or location_mapping['regions']:
-                extracted['countries'].extend(location_mapping['countries'])
-                extracted['regions'].extend(location_mapping['regions'])
-            
-            # Check against other categories with STRICT matching for sectors/technologies
-            services = normalize_and_match_categories(phrase, KNOWN_SERVICES)
-            extracted['services'].extend(services)
-            
-            sectors = normalize_and_match_categories_strict(phrase, KNOWN_SECTORS)  # STRICTER
-            extracted['sectors'].extend(sectors)
-            
-            technologies = normalize_and_match_categories_strict(phrase, KNOWN_TECHNOLOGIES)  # STRICTER
-            extracted['technologies'].extend(technologies)
-    
-    # Check individual words only if no multi-word location matches found
-    if not extracted['countries'] and not extracted['regions']:
-        for word in words:
-            if len(word) <= 2:  # Skip very short words
-                continue
-                
-            # Location mapping for individual words
-            location_mapping = map_location_to_countries_and_regions(word)
-            extracted['countries'].extend(location_mapping['countries'])
-            extracted['regions'].extend(location_mapping['regions'])
-    
-    # Always check individual words for non-location categories
-    for word in words:
-        if len(word) <= 2:
-            continue
-            
-        # Other categories with STRICT matching for technical terms
-        services = normalize_and_match_categories(word, KNOWN_SERVICES)
-        extracted['services'].extend(services)
-        
-        sectors = normalize_and_match_categories_strict(word, KNOWN_SECTORS)  # STRICTER
-        extracted['sectors'].extend(sectors)
-        
-        technologies = normalize_and_match_categories_strict(word, KNOWN_TECHNOLOGIES)  # STRICTER
-        extracted['technologies'].extend(technologies)
-        
-        # Clients (look for uppercase words or known client patterns)
-        if len(word) > 2 and (word.isupper() or word.istitle()):
-            client_mappings = {
-                'usaid': 'USAID',
-                'worldbank': 'World Bank',
-                'wb': 'World Bank',
-                'ifc': 'IFC',
-                'adb': 'Asian Development Bank',
-                'afdb': 'African Development Bank',
-                'iadb': 'Inter-American Development Bank'
-            }
-            
-            if word.lower() in client_mappings:
-                extracted['clients'].append(client_mappings[word.lower()])
-            elif word not in ['give', 'show', 'find', 'list', 'projects', 'me', 'in', 'for', 'the', 'and', 'of', 'to']:
-                extracted['clients'].append(word.upper())
-        
-        # Other terms for fallback (exclude common words and already matched terms)
-        if (len(word) > 3 and 
-            word not in ['give', 'show', 'find', 'list', 'projects', 'project', 'tell', 'about', 'with', 'from', 'that', 'this', 'have', 'been', 'were', 'will', 'would', 'could', 'should'] and
-            word not in [country for countries in extracted['countries'] for country in countries.split()] and
-            word not in [service for services in extracted['services'] for service in services.split()] and
-            word not in [sector for sectors in extracted['sectors'] for sector in sectors.split()] and
-            word not in [tech for techs in extracted['technologies'] for tech in techs.split()]):
-            extracted['other_terms'].append(word)
-    
-    # Remove duplicates and empty values
-    for key in extracted:
-        extracted[key] = list(set([item for item in extracted[key] if item]))
-    
-    return extracted
-
 
 def enhanced_project_lookup_function(
     projects: List[Dict], 
@@ -729,44 +968,6 @@ def enhanced_project_lookup_function(
     
     return filtered_projects
 
-def intelligent_project_search(query: str, projects: List[Dict]) -> tuple:
-    """
-    Enhanced intelligent project search with comprehensive mapping
-    """
-    # Extract keywords using enhanced function
-    extracted = smart_extract_keywords_from_query(query)
-    
-    # Perform lookup with all extracted criteria
-    results = enhanced_project_lookup_function(
-        projects=projects,
-        country_filter=extracted['countries'] if extracted['countries'] else None,
-        region_filter=extracted['regions'] if extracted['regions'] else None,
-        service_filter=extracted['services'] if extracted['services'] else None,
-        sector_filter=extracted['sectors'] if extracted['sectors'] else None,
-        technology_filter=extracted['technologies'] if extracted['technologies'] else None,
-        client_filter=extracted['clients'] if extracted['clients'] else None,
-        other_terms_filter=extracted['other_terms'] if extracted['other_terms'] else None
-    )
-    
-    # Combine criteria for display
-    all_tech_criteria = []
-    all_tech_criteria.extend(extracted['services'])
-    all_tech_criteria.extend(extracted['sectors'])
-    all_tech_criteria.extend(extracted['technologies'])
-    
-    # Combine location criteria for display
-    all_location_criteria = []
-    all_location_criteria.extend(extracted['countries'])
-    all_location_criteria.extend(extracted['regions'])
-    
-    return results, {
-        'locations': all_location_criteria,
-        'technical': all_tech_criteria,
-        'clients': extracted['clients'],
-        'other_terms': extracted['other_terms'],
-        'extracted_details': extracted  # For debugging
-    }
-
 # ---- Keep all your existing formatting functions unchanged ----
 
 def format_project_details(project: Dict) -> str:
@@ -889,10 +1090,27 @@ def format_multiple_projects(projects: List[Dict]) -> str:
     return "\n".join(formatted_projects)
 
 def format_search_summary(search_criteria: Dict, num_results: int) -> str:
-    """Format search criteria summary"""
+    """Format search criteria summary with enhanced method display"""
     summary = []
     summary.append("🔍 **SEARCH CRITERIA APPLIED:**")
     summary.append("")
+    
+    # Show search method used
+    if search_criteria.get('search_method'):
+        method_icons = {
+            'location': '🌍',
+            'technical': '⚡',
+            'client': '🏢',
+            'location + technical': '🌍⚡',
+            'location + technical + client': '🌍⚡🏢',
+            'technical + client': '⚡🏢',
+            'combined': '🔄',
+            'fallback': '🔄'
+        }
+        method = search_criteria['search_method']
+        icon = method_icons.get(method, '🔍')
+        summary.append(f"   {icon} **Search Method:** {method.title()}")
+        summary.append("")
     
     if search_criteria.get('locations'):
         summary.append(f"   🌍 **Locations:** {', '.join(search_criteria['locations'])}")
@@ -911,6 +1129,10 @@ def format_search_summary(search_criteria: Dict, num_results: int) -> str:
     
     if search_criteria.get('other_terms'):
         summary.append(f"   🔤 **Other Terms:** {', '.join(search_criteria['other_terms'])}")
+    
+    # Show available clients count
+    if search_criteria.get('available_clients'):
+        summary.append(f"   📊 **Client Database:** {search_criteria['available_clients']} unique clients available")
     
     summary.append("")
     summary.append(f"📊 **Results:** {num_results} project(s) found")
@@ -950,8 +1172,8 @@ def process_project_query(user_input: str, projects: List[Dict], chat_history: L
     is_lookup_query = any(keyword in user_input.lower() for keyword in lookup_keywords)
     
     if is_lookup_query:
-        # Use intelligent project search
-        filtered_projects, search_criteria = intelligent_project_search(user_input, projects)
+        # Use NEW intelligent project search with specialized routing
+        filtered_projects, search_criteria = intelligent_project_search_v2(user_input, projects)
         
         # Format results with enhanced formatting
         if filtered_projects:
@@ -987,6 +1209,17 @@ def process_project_query(user_input: str, projects: List[Dict], chat_history: L
             response_parts.append("   • **Asia:** China, India, Indonesia, Vietnam, Philippines")
             response_parts.append("   • **Europe:** Germany, Netherlands, Poland, Turkey")
             
+            # Show available clients sample if client search was attempted
+            if search_criteria.get('clients'):
+                client_list = generate_client_list(projects)
+                response_parts.append("")
+                response_parts.append("🏢 **Available Clients (Sample):**")
+                sample_clients = sorted(client_list)[:10]
+                for client in sample_clients:
+                    response_parts.append(f"   • {client}")
+                if len(client_list) > 10:
+                    response_parts.append(f"   • ... and {len(client_list) - 10} more clients")
+            
             formatted_response = "\n".join(response_parts)
         
         return formatted_response, search_criteria, filtered_projects
@@ -995,7 +1228,7 @@ def process_project_query(user_input: str, projects: List[Dict], chat_history: L
         # Use existing vectorstore approach for general queries
         return None, None, None
 
-# ---- Session State and UI ----
+# ---- Session State and UI (keeping existing with enhancements) ----
 if 'vectorstore' not in st.session_state:
     st.session_state['vectorstore'] = None
 
@@ -1012,21 +1245,22 @@ if 'current_question' not in st.session_state:
 with st.sidebar:
     st.subheader("💡 Smart Project Lookup Examples")
     
-    # Updated examples with actual countries from the complete list
+    # Updated examples showcasing new specialized search methods
     lookup_examples = [
-        "Show me renewable energy projects in Brazil",
-        "Find DD projects for solar technology in India", 
-        "Give me LNG projects in United States",
-        "List all wind projects in China",
-        "Show me feasibility studies in MENA region",
-        "Find owner's engineer projects for BESS in Germany",
-        "Give me hydro projects in Philippines",
-        "Show me projects in Nigeria or Kenya",
-        "Find solar projects in Morocco",
-        "List water projects in Indonesia",
-        "Show me projects in Caribbean region",
-        "Find nuclear projects in Turkey",
-        "Give me geothermal projects in Indonesia"
+        "Show me renewable energy projects in Brazil",  # Location + Technical
+        "Find DD projects for solar technology in India",  # Location + Technical + Service
+        "Give me LNG projects in United States",  # Location + Technical
+        "List all wind projects in China",  # Location + Technical
+        "Show me feasibility studies in MENA region",  # Region + Service
+        "Find owner's engineer projects for BESS in Germany",  # Location + Service + Technical
+        "Give me hydro projects in Philippines",  # Location + Technical
+        "Show me projects in Nigeria or Kenya",  # Multi-location
+        "Find solar projects in Morocco",  # Location + Technical
+        "List water projects in Indonesia",  # Location + Sector
+        "Show me projects in Caribbean region",  # Region
+        "Find nuclear projects in Turkey",  # Location + Technical (strict)
+        "Give me World Bank projects",  # Client-focused
+        "Show me USAID renewable projects"  # Client + Technical
     ]
     
     for example in lookup_examples:
@@ -1035,6 +1269,15 @@ with st.sidebar:
             st.rerun()
     
     st.divider()
+    
+    # Show client database info
+    if st.session_state['project_data']:
+        projects = st.session_state['project_data'].get('projects', [])
+        client_list = generate_client_list(projects)
+        
+        st.subheader("🏢 Client Database")
+        st.metric("Available Clients", len(client_list))
+        
     
     # Enhanced category reference guide with complete country list
     st.subheader("📚 Search Categories & Coverage")
@@ -1094,14 +1337,14 @@ with st.sidebar:
         - **Conventional**: Natural Gas, Coal, Nuclear, Oil
         - **Storage**: BESS, Grid Storage, Pumped Hydro
         - **Hydrogen**: Green H2, Blue H2, Fuel Cells
-        - **LNG to Power**: Gas-to-Power, LNG Terminals  ⚠️ *Specific sector*
+        - **LNG to Power**: Gas-to-Power, LNG Terminals
         - **Infrastructure**: Water, Wastewater, Transport
         
         **Key Technologies:**
         - Solar: PV, CSP, Distributed Solar
         - Wind: Onshore, Offshore, Small Wind
         - Gas: CCGT, OCGT, Cogeneration, LNG
-        - Nuclear: Nuclear Power, Atomic Energy  ⚠️ *Specific technology*
+        - Nuclear: Nuclear Power, Atomic Energy
         - Storage: Lithium-ion, Flow Batteries
         - Hydro: Large, Small, Pumped Storage
         """)
@@ -1117,11 +1360,11 @@ with st.sidebar:
         - **Dev**: Project Development & Structuring
         - **Policy**: Regulatory & Policy Analysis
         
-        **Common Clients:**
-        - World Bank, IFC, ADB, AfDB, IADB
-        - USAID, Development Finance Institutions
-        - Private Equity, Infrastructure Funds
-        - Utilities, IPPs, Government Agencies
+        **Client Search Features:**
+        - Fuzzy matching for client names
+        - Handles abbreviations (WB → World Bank)
+        - Dynamic client list from database
+        - Case-insensitive search
         """)
     
     st.divider()
@@ -1185,157 +1428,75 @@ for i, (user, bot) in enumerate(st.session_state['chat_history']):
         st.markdown(f"**🤖 Assistant:** {bot}")
         st.divider()
 
-# MOVED TO BOTTOM: Enhanced chat input processing with sticky container
-with st.container():
-    st.markdown("---")
-    st.markdown("### 💬 Ask about K&M's projects:")
-    
-    # Create columns for input and button
-    col1, col2 = st.columns([4, 1])
-    
-    with col1:
-        user_input = st.text_input("", 
-                              value=st.session_state['current_question'],
-                              key="kb_input", 
-                              placeholder="e.g., 'Show me renewable energy projects in Brazil' or 'Find DD projects for solar in Asia'",
-                              label_visibility="collapsed")
-    
-    with col2:
-        send_button = st.button("Send", key="kb_send", use_container_width=True)
-
-    if send_button and user_input.strip():
-        if st.session_state['project_data']:
-            projects = st.session_state['project_data'].get('projects', [])
-            
-            with st.spinner("🔍 Searching project database..."):
-                # Try project lookup first
-                formatted_response, criteria, filtered_projects = process_project_query(
-                    user_input, projects, st.session_state['chat_history']
-                )
-                
-                if formatted_response is not None:
-                    # This is a project lookup query - use the formatted response
-                    response = formatted_response
-                    # Store last search criteria for debugging
-                    st.session_state['last_search_criteria'] = criteria
-                else:
-                    # Fall back to existing vectorstore approach
-                    response = "I can help you search for specific projects. Try asking something like 'Show me projects in [country]' or 'Find LNG projects for [client]'."
-            
-            st.session_state['chat_history'].append((user_input, response))
-            st.session_state['current_question'] = ""
-            st.rerun()
-
-# Add enhanced information section
-st.markdown("---")
+# FIXED: ChatGPT-style sticky input at bottom
 st.markdown("""
-### 🎯 **Complete Search Guide:**
+<style>
+/* Add bottom padding to main content to avoid overlap */
+.main .block-container {
+    padding-bottom: 120px;
+}
 
-#### **🌍 Global Coverage - 99+ Countries:**
-Our database now covers **99+ countries** across all 7 World Bank regions:
+/* Hide default streamlit input styling */
+.stTextInput > label {
+    display: none;
+}
+</style>
+""", unsafe_allow_html=True)
 
-**🌎 Americas (35 countries):** From Canada to Argentina, including all Caribbean nations
-**🌍 Africa (32 countries):** Comprehensive Sub-Saharan and North African coverage  
-**🌏 Asia-Pacific (16 countries):** Major economies from China to Australia
-**🌍 Europe (16 countries):** EU and Central Asian markets
-**🌍 Middle East (8 countries):** Key MENA energy markets
+# Create the sticky input container
+st.markdown('<div class="chat-input-container">', unsafe_allow_html=True)
 
-#### **🔍 Smart Search Examples:**
+col1, col2 = st.columns([5, 1])
 
-**Regional Searches:**
-- ✅ "renewable projects in Africa" → All SSA countries
-- ✅ "solar projects in LAC" → Latin America & Caribbean
-- ✅ "wind projects in Asia" → EAP + South Asia regions
+with col1:
+    user_input = st.text_input(
+        "", 
+        value=st.session_state['current_question'],
+        key="kb_input", 
+        placeholder="Ask about K&M's projects... (e.g., 'Give me LNG projects in United States')",
+        label_visibility="collapsed"
+    )
 
-**Multi-Country Searches:**
-- ✅ "projects in Brazil or Mexico" → Both countries
-- ✅ "show me projects in BRICS countries" → Brazil, Russia, India, China
-- ✅ "find projects in island nations" → Caribbean, Pacific islands
+with col2:
+    send_button = st.button("Send", key="kb_send", use_container_width=True)
 
-**Technology + Location:**
-- ✅ "offshore wind projects in Europe"
-- ✅ "solar + storage projects in Africa"
-- ✅ "LNG terminals in Asia Pacific"
+st.markdown('</div>', unsafe_allow_html=True)
 
-**Service + Sector Combinations:**
-- ✅ "feasibility studies for renewable energy"
-- ✅ "due diligence for LNG projects"
-- ✅ "owner's engineer for wind farms"
-
-#### **💡 Pro Search Tips:**
-
-1. **Use Natural Language**: "Show me all hydro projects in South America"
-2. **Combine Multiple Filters**: "Find renewable energy DD projects in emerging markets"
-3. **Try Regional Abbreviations**: "List FS projects in SSA" or "Show MENA projects"
-4. **Use Technology Variations**: "Battery storage" = "BESS" = "Energy storage"
-5. **Client-Specific Searches**: "World Bank projects in Africa" or "USAID renewable projects"
-6. **⚠️ Precise Technical Terms**: "LNG" → LNG to Power sector only, "Nuclear" → Nuclear technology only
-
-#### **📊 Database Scope:**
-- **99+ Countries** with intelligent fuzzy matching
-- **8 Major Sectors** from renewable to infrastructure
-- **15+ Technologies** including emerging tech like hydrogen
-- **7 Service Types** from feasibility to transaction advisory
-- **Smart Region Mapping** with automatic country inclusion
-- **Stricter Technical Matching** for more precise results
-""")
-
-# Enhanced debug information
-if st.checkbox("Show Advanced Debug Info", value=False):
+# Process input
+if send_button and user_input.strip():
     if st.session_state['project_data']:
         projects = st.session_state['project_data'].get('projects', [])
-        st.subheader("🔍 Advanced Debug Information")
         
-        # Show complete country coverage
-        st.markdown("**Complete Country Coverage:**")
-        col1, col2, col3 = st.columns(3)
+        with st.spinner("🔍 Searching project database..."):
+            # Try project lookup first
+            formatted_response, criteria, filtered_projects = process_project_query(
+                user_input, projects, st.session_state['chat_history']
+            )
+            
+            if formatted_response is not None:
+                # This is a project lookup query - use the formatted response
+                response = formatted_response
+                # Store last search criteria for debugging
+                st.session_state['last_search_criteria'] = criteria
+            else:
+                # Fall back to existing vectorstore approach
+                response = "I can help you search for specific projects. Try asking something like 'Show me projects in [country]' or 'Find LNG projects for [client]'."
         
-        country_list = list(KNOWN_COUNTRIES.keys())
-        chunk_size = len(country_list) // 3
-        
-        with col1:
-            st.markdown("**Americas & Europe:**")
-            for country in sorted(country_list[:chunk_size]):
-                st.markdown(f"• {country.title()}")
-        
-        with col2:
-            st.markdown("**Africa & Middle East:**")
-            for country in sorted(country_list[chunk_size:2*chunk_size]):
-                st.markdown(f"• {country.title()}")
-        
-        with col3:
-            st.markdown("**Asia & Pacific:**")
-            for country in sorted(country_list[2*chunk_size:]):
-                st.markdown(f"• {country.title()}")
-        
-        st.markdown(f"**Total Countries Supported:** {len(KNOWN_COUNTRIES)}")
-        
-        # Show technical matching examples
-        st.markdown("**Technical Search Restrictions:**")
-        st.markdown("- **'LNG'** → Only matches 'LNG to Power' sector")
-        st.markdown("- **'Nuclear'** → Only matches 'Nuclear' technology")
-        st.markdown("- **'Gas'** → Matches both 'Natural Gas' technology and general gas terms")
-        st.markdown("- **'Storage'** → Matches 'Energy Storage' sector and 'BESS' technology")
-        
-        # Show region mapping examples
-        st.markdown("**Region → Country Mapping Examples:**")
-        test_locations = ["Africa", "LAC", "Asia", "MENA", "Caribbean", "Europe"]
-        for location in test_locations:
-            mapping = map_location_to_countries_and_regions(location)
-            st.markdown(f"**{location}** → {len(mapping['countries'])} countries, {len(mapping['regions'])} regions")
-        
-        # Show last search criteria if available
-        if hasattr(st.session_state, 'last_search_criteria') and st.session_state.last_search_criteria:
-            st.markdown("**Last Search Breakdown:**")
-            st.json(st.session_state.last_search_criteria)
+        st.session_state['chat_history'].append((user_input, response))
+        st.session_state['current_question'] = ""
+        st.rerun()
+
 
 # Enhanced footer
 st.markdown("---")
 st.markdown("""
 <div style='text-align: center; color: #666; font-size: 0.8em;'>
     K&M Engineering & Consulting Corporation - Global Project Knowledge Assistant<br>
-    Enhanced with Complete Country Coverage (99+ Nations) & Precise Technical Matching<br>
-    <em>Comprehensive global project database with advanced search capabilities</em>
+    Enhanced with Specialized Search Methods: Location-First | Technical-First | Client-First | Combined<br>
+    <em>Intelligent search routing with 99+ countries, {} unique clients, and precise technical matching</em>
 </div>
-""", unsafe_allow_html=True)
+""".format(
+    len(generate_client_list(st.session_state['project_data'].get('projects', []))) if st.session_state['project_data'] else 0
+), unsafe_allow_html=True)
+
 

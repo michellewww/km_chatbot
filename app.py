@@ -1448,10 +1448,9 @@ with st.sidebar:
             "Show me renewable energy projects in Brazil",
             "Find DD projects for solar technology in India",  # Location + Technical + Service
             "Give me LNG projects in United States",  # Location + Technical
-            "List all wind projects in China",  # Location + Technical
+            "Find solar and natural gas projects for in Brazil",  # Location + Technical
             "Show me feasibility studies in MENA region",  # Region + Service
             "Find owner's engineer projects for BESS in Germany",  # Location + Service + Technical
-            "Give me hydro projects in Philippines",  # Location + Technical
             "Show me projects in Nigeria or Kenya",  # Multi-location
             "Find solar projects in Morocco",  # Location + Technical
             "List conventional energy projects in Indonesia",  # Location + Sector

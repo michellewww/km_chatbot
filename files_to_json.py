@@ -69,7 +69,10 @@ def extract_table_data(table):
             continue
             
         # Extract data from each column
-        job_number = clean_text(cells[0])
+        job_number_raw = clean_text(cells[0])
+        # Convert job number format (e.g., 1065.15 -> 1065-15)
+        job_number = format_job_id(job_number_raw)
+        
         duration = clean_text(cells[1])
         assignment_description = clean_text(cells[2])
         client_country_raw = cells[3]  # Keep raw text with newlines
@@ -157,14 +160,42 @@ def safe_get_column(row, possible_keys, df):
                 return value
     return ''
 
-# Function to format project ID as integer (no decimals)
-def format_project_id(value):
+# Updated function to format job ID with decimal to dash conversion
+def format_job_id(value):
+    """Format job ID, converting decimal format to dash format (e.g., 1065.15 -> 1065-15)"""
     if pd.isna(value) or str(value).strip() == '':
         return ''
+    
     try:
-        return str(int(float(value)))
+        # Convert to string first
+        value_str = str(value).strip()
+        
+        # Check if it contains a decimal point
+        if '.' in value_str:
+            # Split by decimal point
+            parts = value_str.split('.')
+            if len(parts) == 2:
+                # Convert to integer parts and join with dash
+                main_part = str(int(float(parts[0])))
+                sub_part = parts[1].rstrip('0')  # Remove trailing zeros
+                if sub_part:  # Only add dash if there's a meaningful sub-part
+                    return f"{main_part}-{sub_part}"
+                else:
+                    return main_part
+        
+        # If no decimal, try to convert to integer to remove any .0
+        try:
+            return str(int(float(value_str)))
+        except (ValueError, TypeError):
+            return value_str
+            
     except (ValueError, TypeError):
         return str(value).strip()
+
+# Function to format project ID as integer (no decimals) - UPDATED
+def format_project_id(value):
+    """Format project ID, converting decimal format to dash format for Excel data"""
+    return format_job_id(value)  # Use the same logic as job ID formatting
 
 # Function to format year values
 def format_year(value):
@@ -375,6 +406,8 @@ def merge_project_data(excel_projects, docx_projects):
     
     # Add DOCX projects, checking for matches
     unmatched_docx = []
+    matched_count = 0
+    
     for project in docx_projects:
         job_number = project.get('job_number', '').strip()
         
@@ -391,9 +424,15 @@ def merge_project_data(excel_projects, docx_projects):
                 'docx_contract_value': project['contract_value']
             }
             excel_project['source'] = 'both'
+            matched_count += 1
+            print(f"Matched project ID: {job_number}")
         else:
             # No match found, add as separate project
             unmatched_docx.append(project)
+            print(f"Unmatched DOCX project ID: {job_number}")
+    
+    print(f"Successfully matched {matched_count} projects between Excel and DOCX")
+    print(f"Unmatched DOCX projects: {len(unmatched_docx)}")
     
     # Combine all projects
     all_projects = list(merged_projects.values()) + unmatched_docx
@@ -413,6 +452,10 @@ def main():
     excel_projects = []
     if os.path.exists(excel_path):
         excel_projects = process_excel_file(excel_path, sheet_name)
+        # Print some sample Excel project IDs for verification
+        print("\nSample Excel project IDs:")
+        for i, project in enumerate(excel_projects[:5]):
+            print(f"  {project.get('project_id', 'N/A')}")
     else:
         print(f"Excel file not found: {excel_path}")
     
@@ -421,6 +464,10 @@ def main():
     docx_projects = []
     if os.path.exists(docx_path):
         docx_projects = process_docx_file(docx_path)
+        # Print some sample DOCX job numbers for verification
+        print("\nSample DOCX job numbers:")
+        for i, project in enumerate(docx_projects[:5]):
+            print(f"  {project.get('job_number', 'N/A')}")
     else:
         print(f"DOCX file not found: {docx_path}")
     
@@ -435,7 +482,7 @@ def main():
             "excel_projects": len(excel_projects),
             "docx_projects": len(docx_projects),
             "total_merged_projects": len(merged_projects),
-            "extraction_date": "2025-06-20"
+            "extraction_date": "2025-06-23"
         },
         "projects": merged_projects
     }

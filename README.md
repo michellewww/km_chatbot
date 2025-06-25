@@ -10,7 +10,8 @@ km_chatbot/
 
 1. Clone the repo
 2. Run `pip install -r requirements.txt`
-2. Run `ollama serve'
+3. Run `ollama serve`
+4. Run `python files_to_json.py`
 3. Open a new terminal and run `streamlit run app.py`
 
 

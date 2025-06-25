@@ -16,7 +16,12 @@ from difflib import SequenceMatcher
 VECTORSTORE_DIR = "./chroma_store"
 PROJECT_JSON = "./Shared/Marketing/Project Descriptions/combined_project_data.json"
 WEBSITE_MD = "./Shared/website.md"
+
 USE_OPENAI = False  # Set to True to use OpenAI, False for local Ollama
+OPENAI_API_KEY = st.secrets.get('OPENAI_API_KEY') or os.getenv('OPENAI_API_KEY')
+if USE_OPENAI and not OPENAI_API_KEY:
+    st.error("⚠️ OpenAI API key not found. Please set OPENAI_API_KEY in your environment variables or Streamlit secrets.")
+    st.stop()
 
 st.title("K&M Project Knowledge Assistant")
 st.caption("Powered by comprehensive project database and website content")
@@ -1222,7 +1227,7 @@ def setup_vectorstore():
     
     # Setup embeddings and vectorstore
     if USE_OPENAI:
-        embeddings = OpenAIEmbeddings()
+        embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
     else:
         embeddings = OllamaEmbeddings(model="nomic-embed-text")
     
@@ -1244,7 +1249,7 @@ def setup_llm_chain():
     
     # Setup LLM
     if USE_OPENAI:
-        llm = ChatOpenAI(temperature=0, model_name="gpt-4o-mini")
+        llm = ChatOpenAI(temperature=0, model_name="gpt-4.1-mini", openai_api_key=OPENAI_API_KEY)
     else:
         llm = ChatOllama(model="llama3", temperature=0)
     

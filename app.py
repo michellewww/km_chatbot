@@ -12,56 +12,463 @@ from langchain.schema import Document as LangchainDocument
 import re
 from typing import List, Dict, Any, Optional
 from difflib import SequenceMatcher
+import docx
+import PyPDF2
+from io import BytesIO
+import nltk
+from sentence_transformers import SentenceTransformer
+import numpy as np
+from sklearn.metrics.pairwise import cosine_similarity
+from openai import OpenAI
+from dotenv import load_dotenv
+
+# Add this at the top of your script, before other imports
+load_dotenv()
+
+# Download required NLTK data
+try:
+    nltk.data.find('tokenizers/punkt')
+except LookupError:
+    nltk.download('punkt')
 
 VECTORSTORE_DIR = "./chroma_store"
 PROJECT_JSON = "./Shared/Marketing/Project Descriptions/combined_project_data.json"
 WEBSITE_MD = "./Shared/website.md"
 
-USE_OPENAI = False  # Set to True to use OpenAI, False for local Ollama
-OPENAI_API_KEY = st.secrets.get('OPENAI_API_KEY') or os.getenv('OPENAI_API_KEY')
+USE_OPENAI = True  # Set to True to use OpenAI, False for local Ollama
+def get_openai_api_key():
+    """Get OpenAI API key from environment or Streamlit secrets"""
+    api_key = os.getenv('OPENAI_API_KEY')
+    if not api_key:
+        try:
+            api_key = st.secrets.get("OPENAI_API_KEY")
+        except Exception:
+            pass
+    return api_key
+
+OPENAI_API_KEY = get_openai_api_key()
 if USE_OPENAI and not OPENAI_API_KEY:
     st.error("⚠️ OpenAI API key not found. Please set OPENAI_API_KEY in your environment variables or Streamlit secrets.")
     st.stop()
 
+openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
+
 st.title("K&M Project Knowledge Assistant")
 st.caption("Powered by comprehensive project database and website content")
+
+# ---- CV PROCESSING FUNCTIONS ----
+
+def extract_text_from_docx(file_content):
+    try:
+        doc = docx.Document(BytesIO(file_content))
+        full_text = []
+        for paragraph in doc.paragraphs:
+            if paragraph.text.strip():
+                full_text.append(paragraph.text.strip())
+        for table in doc.tables:
+            for row in table.rows:
+                row_text = []
+                for cell in row.cells:
+                    cell_text = []
+                    for paragraph in cell.paragraphs:
+                        if paragraph.text.strip():
+                            cell_text.append(paragraph.text.strip())
+                    if cell_text:
+                        row_text.append(' '.join(cell_text))
+                if row_text:
+                    full_text.append(' | '.join(row_text))
+        return '\n'.join(full_text)
+    except Exception as e:
+        st.error(f"Error reading DOCX file: {e}")
+        return None
+
+def extract_text_from_pdf(file_content):
+    try:
+        pdf_reader = PyPDF2.PdfReader(BytesIO(file_content))
+        text = []
+        for page in pdf_reader.pages:
+            page_text = page.extract_text()
+            if page_text and page_text.strip():
+                text.append(page_text.strip())
+        return '\n'.join(text)
+    except Exception as e:
+        st.error(f"Error reading PDF file: {e}")
+        return None
+
+def separate_cv_sections(cv_text: str) -> tuple:
+    work_undertaken_patterns = [
+        r'Work\s+Undertaken\s+that\s+Best\s+Illustrates\s+Capability\s+to\s+Handle\s+the\s+Tasks\s+Assigned',
+        r'Work\s+Undertaken\s+that\s+Best\s+Illustrates',
+        r'WORK\s+UNDERTAKEN\s+THAT\s+BEST\s+ILLUSTRATES',
+        r'Work\s+undertaken\s+that\s+best\s+illustrates',
+        r'Project\s+Experience',
+        r'PROJECT\s+EXPERIENCE',
+        r'Key\s+Projects',
+        r'Selected\s+Projects'
+    ]
+    project_section_start = None
+    for pattern in work_undertaken_patterns:
+        match = re.search(pattern, cv_text, re.IGNORECASE)
+        if match:
+            project_section_start = match.start()
+            break
+    if project_section_start is not None:
+        bio_text = cv_text[:project_section_start].strip()
+        projects_text = cv_text[project_section_start:].strip()
+    else:
+        project_patterns = [
+            r'Project\s+Director[,:]',
+            r'Project\s+Manager[,:]',
+            r'Team\s+Leader[,:]',
+            r'Lead\s+Consultant[,:]',
+            r'Senior\s+\w+\s+Expert[,:]'
+        ]
+        matches = []
+        for pattern in project_patterns:
+            for match in re.finditer(pattern, cv_text, re.IGNORECASE):
+                matches.append(match.start())
+        if matches:
+            project_section_start = min(matches)
+            bio_text = cv_text[:project_section_start].strip()
+            projects_text = cv_text[project_section_start:].strip()
+        else:
+            split_point = int(len(cv_text) * 0.6)
+            bio_text = cv_text[:split_point].strip()
+            projects_text = cv_text[split_point:].strip()
+    return bio_text, projects_text
+
+def parse_projects_section(projects_text: str) -> List[str]:
+    project_separators = [
+        r'Project\s+Director[,:]',
+        r'Project\s+Manager[,:]',
+        r'Team\s+Leader[,:]',
+        r'Lead\s+Consultant[,:]',
+        r'Senior\s+\w+\s+Expert[,:]',
+        r'PPP\s+Financial\s+Expert[,:]',
+        r'Energy\s+Economist[,:]',
+        r'Technical\s+Manager[,:]',
+        r'LNG\s+Expert[,:]',
+        r'Quality\s+Control[,:]',
+        r'Quality\s+Assurance[,:]'
+    ]
+    project_starts = []
+    for pattern in project_separators:
+        for match in re.finditer(pattern, projects_text, re.IGNORECASE):
+            project_starts.append((match.start(), match.group()))
+    project_starts.sort(key=lambda x: x[0])
+    if not project_starts:
+        lines = projects_text.split('\n')
+        projects = []
+        current_project = []
+        for line in lines:
+            line = line.strip()
+            if line:
+                if re.match(r'^[A-Z][^,]*,\s*[A-Z][^(]*\([0-9]{4}', line):
+                    if current_project:
+                        projects.append('\n'.join(current_project))
+                        current_project = []
+                current_project.append(line)
+        if current_project:
+            projects.append('\n'.join(current_project))
+        return projects
+    projects = []
+    for i, (start_pos, _) in enumerate(project_starts):
+        if i < len(project_starts) - 1:
+            end_pos = project_starts[i + 1][0]
+            project_text = projects_text[start_pos:end_pos].strip()
+        else:
+            project_text = projects_text[start_pos:].strip()
+        if project_text:
+            projects.append(project_text)
+    return projects
+
+def find_relevant_projects_with_gpt(projects_text: str, user_description: str, use_gpt: bool = True) -> List[str]:
+    if not use_gpt:
+        st.info("GPT processing disabled - returning empty project list")
+        return []
+    if not openai_client:
+        st.error("OpenAI client not initialized. Please check your API key.")
+        return []
+    try:
+        prompt = f"""
+        You are an expert CV analyst. I will provide you with a projects section from a CV and a job description. 
+        Your task is to identify ALL projects from the CV that are relevant to the job requirements.
+
+        JOB DESCRIPTION:
+        {user_description}
+
+        CV PROJECTS SECTION:
+        {projects_text}
+
+        Please:
+        1. Carefully read through all the projects in the CV
+        2. Identify which projects are relevant to the job description based on:
+           - Similar technologies/sectors
+           - Similar services/roles
+           - Similar project types
+           - Similar skills required
+        3. For each relevant project, copy and paste the EXACT project description from the CV
+        4. Return ONLY the relevant project descriptions, each separated by "---PROJECT_SEPARATOR---"
+
+        Do not summarize or modify the project descriptions - copy them exactly as they appear in the CV.
+        If no projects are relevant, return "NO_RELEVANT_PROJECTS"
+        """
+        response = openai_client.chat.completions.create(
+            model="gpt-4.1-mini",
+            messages=[
+                {"role": "system", "content": "You are an expert CV analyst specializing in matching project experience to job requirements."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.1,
+            max_tokens=4000
+        )
+        result = response.choices[0].message.content.strip()
+        if result == "NO_RELEVANT_PROJECTS":
+            return []
+        relevant_projects = [proj.strip() for proj in result.split("---PROJECT_SEPARATOR---") if proj.strip()]
+        return relevant_projects
+    except Exception as e:
+        st.error(f"Error calling OpenAI API for project matching: {e}")
+        return []
+
+def generate_qualification_paragraphs_with_gpt(bio_text: str, relevant_projects: List[str], user_description: str, use_gpt: bool = True) -> str:
+    if not use_gpt:
+        st.info("GPT processing disabled - returning basic qualification text")
+        return "Qualification generation disabled. Please enable GPT processing to generate tailored qualification paragraphs."
+    if not openai_client:
+        st.error("OpenAI client not initialized. Please check your API key.")
+        return "Unable to generate qualifications - OpenAI API not available."
+    try:
+        projects_combined = "\n\n".join(relevant_projects) if relevant_projects else "No directly relevant projects identified."
+        prompt = f"""
+        You are an expert proposal writer. I will provide you with:
+        1. Bio section from a CV
+        2. Relevant project experience 
+        3. Job/work description
+
+        Your task is to write 1-2 compelling qualification paragraphs that demonstrate why this person is qualified for the described work.
+
+        BIO SECTION:
+        {bio_text}
+
+        RELEVANT PROJECT EXPERIENCE:
+        {projects_combined}
+
+        JOB/WORK DESCRIPTION:
+        {user_description}
+
+        Please write 1-2 professional paragraphs (maximum 200 words total) that:
+        1. Highlight the person's most relevant qualifications for this specific work
+        2. Reference specific project experience that demonstrates relevant skills
+        3. Mention years of experience, education, or certifications if relevant
+        4. Use a confident, professional tone suitable for a proposal
+        5. Focus on why they are uniquely qualified for THIS specific assignment
+
+        Write in third person (he/she) and make it compelling but factual.
+        """
+        response = openai_client.chat.completions.create(
+            model="gpt-4.1-mini",
+            messages=[
+                {"role": "system", "content": "You are an expert proposal writer specializing in highlighting candidate qualifications for infrastructure and consulting projects."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.2,
+            max_tokens=500
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        st.error(f"Error calling OpenAI API for qualification generation: {e}")
+        return f"Unable to generate qualifications due to API error: {str(e)}"
 
 # ---- MOVE: Button Mode Selection to sidebar top ----
 if 'mode' not in st.session_state:
     st.session_state['mode'] = 'search'  # Default to search
-    
+
+if 'chat_history' not in st.session_state:
+    st.session_state['chat_history'] = []
+
 with st.sidebar:
     st.subheader("Mode Selection")
     col1, col2, col3 = st.columns(3)
-    
     with col1:
         if st.button("General", key="general_btn", 
                     type="primary" if st.session_state['mode'] == 'general' else "secondary",
                     use_container_width=True):
             st.session_state['mode'] = 'general'
             st.rerun()
-    
     with col2:
         if st.button("Search", key="search_btn", 
                     type="primary" if st.session_state['mode'] == 'search' else "secondary",
                     use_container_width=True):
             st.session_state['mode'] = 'search'
             st.rerun()
-    
     with col3:
         if st.button("CV", key="cv_btn", 
                     type="primary" if st.session_state['mode'] == 'cv' else "secondary",
                     use_container_width=True):
             st.session_state['mode'] = 'cv'
             st.rerun()
-    
-    # Show current mode
     st.caption(f"**Current Mode:** {st.session_state['mode'].title()}")
     st.divider()
-    
 
+# ---- CV MODE UI ----
+if st.session_state['mode'] == 'cv':
+    st.subheader("📋 AI-Powered CV Analysis & Proposal Generation")
+    st.info("Upload a CV (DOCX or PDF) and describe the work requirements. AI will identify relevant projects and generate key qualification paragraphs.")
 
-# ---- Enhanced Project Lookup Functions with Complete Country List ----
+    if not OPENAI_API_KEY:
+        st.error("⚠️ OpenAI API key required for CV analysis. Please set OPENAI_API_KEY in your environment variables or Streamlit secrets.")
+        st.stop()
+
+    uploaded_file = st.file_uploader(
+        "Upload CV File",
+        type=['docx', 'pdf'],
+        help="Upload a DOCX or PDF file containing the CV to analyze"
+    )
+
+    work_description = st.text_area(
+        "Describe the Work/Project Requirements",
+        placeholder="e.g., 'We need a senior consultant for feasibility study of a 100MW solar project in Kenya, including technical assessment, financial modeling, and regulatory analysis.'",
+        height=100,
+        help="Provide a detailed description of the work requirements. AI will match this against the CV projects."
+    )
+
+    with st.expander("🔧 Advanced Settings"):
+        st.info("CV analysis uses OpenAI GPT-4.1-mini for intelligent project matching and qualification generation.")
+        show_sections = st.checkbox(
+            "Show CV Section Breakdown", 
+            value=True,
+            help="Display how the CV was separated into bio and projects sections"
+        )
+        use_gpt_processing = st.checkbox(
+            "Enable GPT Processing", 
+            value=False,
+            help="Enable AI processing with GPT-4.1-mini. If disabled, will only show document sections without AI analysis."
+        )
+
+    if uploaded_file and work_description:
+        if st.button("🤖 Analyze CV with AI", type="primary", use_container_width=True):
+            with st.spinner("🤖 Processing CV and analyzing content..."):
+                try:
+                    file_content = uploaded_file.read()
+                    if uploaded_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+                        cv_text = extract_text_from_docx(file_content)
+                    elif uploaded_file.type == "application/pdf":
+                        cv_text = extract_text_from_pdf(file_content)
+                    else:
+                        st.error("Unsupported file type")
+                        st.stop()
+                    if not cv_text:
+                        st.error("Could not extract text from the uploaded file")
+                        st.stop()
+                    bio_text, projects_text = separate_cv_sections(cv_text)
+                    individual_projects = parse_projects_section(projects_text)
+
+                    if show_sections:
+                        st.markdown("## 📄 Document Sections Extracted")
+                        st.markdown("### 👤 Bio Section")
+                        with st.expander("View Bio Section", expanded=True):
+                            st.text_area("Bio Text", bio_text, height=300, disabled=True, key="bio_display")
+                        st.markdown("### 📁 Projects Section")
+                        with st.expander("View Projects Section", expanded=True):
+                            st.text_area("Projects Text", projects_text, height=400, disabled=True, key="projects_display")
+                        if individual_projects:
+                            st.markdown(f"### 📋 Individual Projects ({len(individual_projects)} projects found)")
+                            for i, project in enumerate(individual_projects, 1):
+                                with st.expander(f"Project {i}", expanded=False):
+                                    st.text_area(f"Project {i} Details", project, height=200, disabled=True, key=f"project_{i}_display")
+
+                    if not use_gpt_processing:
+                        st.success("✅ Document sections extracted successfully!")
+                        st.info("GPT processing is disabled. Enable it in Advanced Settings to get AI analysis and qualification generation.")
+                        basic_response = f"""
+                        # 📋 CV DOCUMENT ANALYSIS
+                        **Work Description:** {work_description}
+
+                        ## 📄 Document Sections Extracted
+                        - **Bio Section Length:** {len(bio_text)} characters
+                        - **Projects Section Length:** {len(projects_text)} characters
+                        - **Individual Projects Found:** {len(individual_projects)}
+
+                        *GPT processing was disabled. Enable it to get AI-powered project matching and qualification generation.*
+                        """
+                        st.session_state['chat_history'].append((
+                            f"CV Document Analysis: {work_description}",
+                            basic_response
+                        ))
+                        st.stop()
+
+                    # ---- GPT Processing (only once per submit) ----
+                    relevant_projects = find_relevant_projects_with_gpt(projects_text, work_description, use_gpt_processing)
+                    qualifications = generate_qualification_paragraphs_with_gpt(bio_text, relevant_projects, work_description, use_gpt_processing)
+
+                    st.success("✅ AI Analysis Complete!")
+
+                    # Only show the generated answer if show_sections is False
+                    if not show_sections:
+                        st.markdown("## 🎯 Key Qualifications")
+                        st.text_area("Key Qualification Paragraphs", qualifications, height=160, disabled=False, key="qualifications_copiable")
+                        if relevant_projects:
+                            st.markdown(f"## 📁 Relevant Project Experience ({len(relevant_projects)} projects)")
+                            for i, project in enumerate(relevant_projects, 1):
+                                st.text_area(f"Project {i}", project, height=180, disabled=False, key=f"relevant_project_{i}_copiable")
+                        else:
+                            st.info("No directly relevant projects identified.")
+                        st.stop()
+
+                    # If show_sections is True, display both sections and AI results below
+                    st.markdown("## 🎯 Key Qualifications")
+                    st.text_area("Key Qualification Paragraphs", qualifications, height=160, disabled=False, key="qualifications_copiable_2")
+                    if relevant_projects:
+                        st.markdown(f"## 📁 Relevant Project Experience ({len(relevant_projects)} projects)")
+                        for i, project in enumerate(relevant_projects, 1):
+                            st.text_area(f"Project {i}", project, height=180, disabled=False, key=f"relevant_project_{i}_copiable_2")
+                    else:
+                        st.info("No directly relevant projects identified.")
+
+                    st.session_state['chat_history'].append((
+                        f"AI CV Analysis: {work_description}",
+                        qualifications + "\n\n" + "\n\n".join(relevant_projects)
+                    ))
+
+                except Exception as e:
+                    st.error(f"Error processing CV: {str(e)}")
+                    st.error("Please check that your CV file is not corrupted and contains readable text.")
+                    import traceback
+                    st.error(f"Detailed error: {traceback.format_exc()}")
+
+    elif uploaded_file:
+        st.info("👆 Please describe the work requirements to analyze the CV")
+    elif work_description:
+        st.info("👆 Please upload a CV file to analyze")
+
+    with st.expander("ℹ️ About AI-Powered CV Analysis"):
+        st.markdown("""
+        **This CV analysis uses OpenAI GPT-4.1-mini to:**
+
+        1. **Intelligent Project Matching**: AI reads through all projects in the CV and identifies those most relevant to your work description
+
+        2. **Exact Text Extraction**: Relevant project descriptions are copied exactly from the CV (no summarization or modification)
+
+        3. **Smart Qualification Writing**: AI combines the candidate's bio and relevant projects to write compelling qualification paragraphs
+
+        **Benefits over traditional keyword matching:**
+        - Understands context and semantic similarity
+        - Identifies relevant projects even with different terminology  
+        - Generates professional, tailored qualification statements
+        - Handles complex CVs with varied formatting
+
+        **Powered by:** OpenAI GPT-4.1-mini API for advanced text analysis and generation
+
+        **New Features:**
+        - Document sections are displayed before GPT processing
+        - Individual projects are parsed and displayed separately
+        - Toggle to control whether to use GPT processing or just extract document sections
+        - Uses the latest GPT-4.1-mini model for improved performance
+        - Enhanced text extraction from DOCX files including tables
+        """)
+
+# ---- EXISTING CODE CONTINUES (All the original project search functionality) ----
 
 # Complete list of all countries from your images
 KNOWN_COUNTRIES = {
@@ -984,7 +1391,7 @@ def enhanced_project_lookup_function(
                     if assignment.get(field):
                         all_text.append(assignment[field])
         
-        # Check for matches
+
         combined_text = ' '.join(all_text).lower()
         
         for term in other_filters:
@@ -1497,8 +1904,21 @@ with st.sidebar:
                 st.rerun()
     
     else:  # CV mode
-        st.subheader("💡 CV Query Examples")
-        st.info("CV functionality will be implemented soon.")
+        st.subheader("💡 CV Analysis Examples")
+        cv_examples = [
+            "Senior consultant for 100MW solar project feasibility study",
+            "Project manager for LNG terminal development in Africa",
+            "Due diligence expert for renewable energy investments",
+            "Lender's engineer for power plant construction",
+            "Financial advisor for infrastructure PPP projects",
+            "Technical expert for water treatment facility",
+            "Transaction advisor for energy sector M&A",
+            "Regulatory consultant for power sector reform"
+        ]
+        
+        st.info("Upload a CV file and use descriptions like:")
+        for example in cv_examples:
+            st.caption(f"• {example}")
     
     st.divider()
     
@@ -1653,7 +2073,6 @@ with st.sidebar:
                 st.markdown(f"• {country}: {count}")
 
 # Display chat history FIRST
-# Display chat history FIRST
 for i, (user, bot) in enumerate(st.session_state['chat_history']):
     with st.container():
         st.markdown(f"**👤 User:** {user}")
@@ -1686,6 +2105,7 @@ st.markdown("""
     .chat-input-container {
         background: #0e1117 !important;
         border-top: 1px solid #262730 !important;
+    
     }
 }
 
@@ -1741,27 +2161,28 @@ with col1:
     elif st.session_state['mode'] == 'general':
         placeholder_text = "Ask about K&M's services... (e.g., 'What services does K&M provide?')"
     else:  # CV mode
-        placeholder_text = "CV queries coming soon..."
+        placeholder_text = "CV analysis ready - upload file above and describe work requirements"
     
     user_input = st.text_input(
         "", 
         value=st.session_state['current_question'],
         key="kb_input", 
         placeholder=placeholder_text,
-        label_visibility="collapsed",
-        disabled=(st.session_state['mode'] == 'cv')  # Disable for CV mode for now
+        label_visibility="collapsed"
     )
 
 with col2:
-    send_button = st.button("Send", key="kb_send", use_container_width=True, 
-                           disabled=(st.session_state['mode'] == 'cv'))
+    send_button = st.button("Send", key="kb_send", use_container_width=True)
 
 st.markdown('</div>', unsafe_allow_html=True)
 
-
 # Process input based on mode
 if send_button and user_input.strip():
-    if st.session_state['project_data']:
+    if st.session_state['mode'] == 'cv':
+        # CV mode - handled above in the CV section
+        st.info("Please use the CV analysis section above to upload a file and describe work requirements.")
+    
+    elif st.session_state['project_data']:
         projects = st.session_state['project_data'].get('projects', [])
         
         if st.session_state['mode'] == 'search':
@@ -1784,9 +2205,6 @@ if send_button and user_input.strip():
                     user_input, projects, st.session_state['chat_history']
                 )
         
-        else:  # CV mode
-            response = "CV functionality is not yet implemented. Please switch to Search or General mode."
-        
         st.session_state['chat_history'].append((user_input, response))
         st.session_state['current_question'] = ""
         st.rerun()
@@ -1797,9 +2215,7 @@ st.markdown(f"""
 <div style='text-align: center; color: #666; font-size: 0.8em;'>
     K&M Advisors LLC - Global Project Knowledge Assistant<br>
     Current Mode: <strong>{st.session_state['mode'].title()}</strong> | 
-    Enhanced with Specialized Search Methods: Location-First | Technical-First | Client-First | Combined<br>
+    Enhanced with Specialized Search Methods: Location-First | Technical-First | Client-First | Combined | CV Analysis<br>
+    CV Mode: Advanced semantic matching with DOCX/PDF support for targeted proposal generation
 </div>
 """, unsafe_allow_html=True)
-
-
-        

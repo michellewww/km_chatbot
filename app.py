@@ -21,6 +21,7 @@ import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 from openai import OpenAI
 from dotenv import load_dotenv
+import shutil
 
 # Add this at the top of your script, before other imports
 load_dotenv()
@@ -246,7 +247,7 @@ def generate_qualification_paragraphs_with_gpt(bio_text: str, relevant_projects:
         2. Relevant project experience 
         3. Job/work description
 
-        Your task is to write 1-2 compelling qualification paragraphs that demonstrate why this person is qualified for the described work.
+        Your task is to write 2-4 compelling qualification paragraphs that demonstrate why this person is qualified for the described work.
 
         BIO SECTION:
         {bio_text}
@@ -284,8 +285,46 @@ def generate_qualification_paragraphs_with_gpt(bio_text: str, relevant_projects:
 if 'mode' not in st.session_state:
     st.session_state['mode'] = 'search'  # Default to search
 
+# Initialize separate chat histories for each tab
+if 'chat_history_general' not in st.session_state:
+    st.session_state['chat_history_general'] = []
+
+if 'chat_history_search' not in st.session_state:
+    st.session_state['chat_history_search'] = []
+
+if 'chat_history_cv' not in st.session_state:
+    st.session_state['chat_history_cv'] = []
+
+# Keep backward compatibility
 if 'chat_history' not in st.session_state:
     st.session_state['chat_history'] = []
+    
+
+def get_current_chat_history():
+    """Get chat history for current mode"""
+    mode = st.session_state.get('mode', 'search')
+    if mode == 'general':
+        return st.session_state['chat_history_general']
+    elif mode == 'search':
+        return st.session_state['chat_history_search']
+    elif mode == 'cv':
+        return st.session_state['chat_history_cv']
+    else:
+        return st.session_state['chat_history']
+
+def add_to_current_chat_history(user_msg, bot_msg):
+    """Add message to current mode's chat history"""
+    mode = st.session_state.get('mode', 'search')
+    if mode == 'general':
+        st.session_state['chat_history_general'].append((user_msg, bot_msg))
+    elif mode == 'search':
+        st.session_state['chat_history_search'].append((user_msg, bot_msg))
+    elif mode == 'cv':
+        st.session_state['chat_history_cv'].append((user_msg, bot_msg))
+    else:
+        st.session_state['chat_history'].append((user_msg, bot_msg))
+
+
 
 with st.sidebar:
     st.subheader("Mode Selection")
@@ -337,12 +376,12 @@ if st.session_state['mode'] == 'cv':
         st.info("CV analysis uses OpenAI GPT-4.1-mini for intelligent project matching and qualification generation.")
         show_sections = st.checkbox(
             "Show CV Section Breakdown", 
-            value=True,
+            value=False,
             help="Display how the CV was separated into bio and projects sections"
         )
         use_gpt_processing = st.checkbox(
             "Enable GPT Processing", 
-            value=False,
+            value=True,
             help="Enable AI processing with GPT-4.1-mini. If disabled, will only show document sections without AI analysis."
         )
 
@@ -392,10 +431,11 @@ if st.session_state['mode'] == 'cv':
 
                         *GPT processing was disabled. Enable it to get AI-powered project matching and qualification generation.*
                         """
-                        st.session_state['chat_history'].append((
+                        add_to_current_chat_history(
                             f"CV Document Analysis: {work_description}",
                             basic_response
-                        ))
+                        )
+
                         st.stop()
 
                     # ---- GPT Processing (only once per submit) ----
@@ -409,7 +449,7 @@ if st.session_state['mode'] == 'cv':
                         st.markdown("## 🎯 Key Qualifications")
                         st.text_area("Key Qualification Paragraphs", qualifications, height=160, disabled=False, key="qualifications_copiable")
                         if relevant_projects:
-                            st.markdown(f"## 📁 Relevant Project Experience ({len(relevant_projects)} projects)")
+                            st.markdown(f"## 📁 Relevant Project Experience")
                             for i, project in enumerate(relevant_projects, 1):
                                 st.text_area(f"Project {i}", project, height=180, disabled=False, key=f"relevant_project_{i}_copiable")
                         else:
@@ -420,16 +460,29 @@ if st.session_state['mode'] == 'cv':
                     st.markdown("## 🎯 Key Qualifications")
                     st.text_area("Key Qualification Paragraphs", qualifications, height=160, disabled=False, key="qualifications_copiable_2")
                     if relevant_projects:
-                        st.markdown(f"## 📁 Relevant Project Experience ({len(relevant_projects)} projects)")
+                        st.markdown(f"## 📁 Relevant Project Experience")
                         for i, project in enumerate(relevant_projects, 1):
                             st.text_area(f"Project {i}", project, height=180, disabled=False, key=f"relevant_project_{i}_copiable_2")
                     else:
                         st.info("No directly relevant projects identified.")
 
-                    st.session_state['chat_history'].append((
+                    add_to_current_chat_history(
                         f"AI CV Analysis: {work_description}",
-                        qualifications + "\n\n" + "\n\n".join(relevant_projects)
-                    ))
+                        qualifications + "\n\n" + "## 📁 Relevant Project Experience" + "\n\n".join(relevant_projects)
+                    )
+                    
+                    full_cv_response = f"""# 🎯 Key Qualifications
+                    {qualifications}
+
+                    ## 📁 Relevant Project Experience ({len(relevant_projects)} projects)
+
+                    """ + "\n\n".join([f"**Project {i+1}:**\n{proj}" for i, proj in enumerate(relevant_projects)])
+
+                    add_to_current_chat_history(
+                        f"CV Analysis: {uploaded_file.name} - {work_description}",
+                        full_cv_response
+                    )
+
 
                 except Exception as e:
                     st.error(f"Error processing CV: {str(e)}")
@@ -451,21 +504,6 @@ if st.session_state['mode'] == 'cv':
         2. **Exact Text Extraction**: Relevant project descriptions are copied exactly from the CV (no summarization or modification)
 
         3. **Smart Qualification Writing**: AI combines the candidate's bio and relevant projects to write compelling qualification paragraphs
-
-        **Benefits over traditional keyword matching:**
-        - Understands context and semantic similarity
-        - Identifies relevant projects even with different terminology  
-        - Generates professional, tailored qualification statements
-        - Handles complex CVs with varied formatting
-
-        **Powered by:** OpenAI GPT-4.1-mini API for advanced text analysis and generation
-
-        **New Features:**
-        - Document sections are displayed before GPT processing
-        - Individual projects are parsed and displayed separately
-        - Toggle to control whether to use GPT processing or just extract document sections
-        - Uses the latest GPT-4.1-mini model for improved performance
-        - Enhanced text extraction from DOCX files including tables
         """)
 
 # ---- EXISTING CODE CONTINUES (All the original project search functionality) ----
@@ -1611,11 +1649,20 @@ def load_project_data():
     except Exception as e:
         st.error(f"Error loading project data: {e}")
         return None
+    
+def reset_vectorstore():
+    """Reset the vectorstore by deleting the existing one"""
+    if os.path.exists(VECTORSTORE_DIR):
+        shutil.rmtree(VECTORSTORE_DIR)
+        print(f"Deleted existing vectorstore at {VECTORSTORE_DIR}")
+
 
 def setup_vectorstore():
     """Setup vectorstore for website content"""
     if st.session_state.get('vectorstore') is not None:
         return st.session_state['vectorstore']
+    
+    reset_vectorstore()
     
     website_content = load_website_content()
     if not website_content:
@@ -1634,7 +1681,10 @@ def setup_vectorstore():
     
     # Setup embeddings and vectorstore
     if USE_OPENAI:
-        embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
+        embeddings = OpenAIEmbeddings(
+            openai_api_key=OPENAI_API_KEY,
+            model="text-embedding-ada-002"
+        )
     else:
         embeddings = OllamaEmbeddings(model="nomic-embed-text")
     
@@ -1656,7 +1706,8 @@ def setup_llm_chain():
     
     # Setup LLM
     if USE_OPENAI:
-        llm = ChatOpenAI(temperature=0, model_name="gpt-4.1-mini", openai_api_key=OPENAI_API_KEY)
+        llm = ChatOpenAI(temperature=0, model_name="gpt-4o-mini", openai_api_key=OPENAI_API_KEY)
+        print("Using OpenAI LLM")
     else:
         llm = ChatOllama(model="llama3", temperature=0)
     
@@ -1826,8 +1877,9 @@ def process_general_query(user_input: str, projects: List[Dict], chat_history: L
         if chain:
             try:
                 # Format chat history for the chain
-                formatted_history = [(msg[0], msg[1]) for msg in chat_history[-5:]]  # Last 5 exchanges
-                
+                current_history = get_current_chat_history()
+                formatted_history = [(msg[0], msg[1]) for msg in current_history[-5:]]  # Last 5 exchanges
+
                 result = chain({
                     "question": user_input,
                     "chat_history": formatted_history
@@ -1848,8 +1900,20 @@ if 'vectorstore' not in st.session_state:
 if 'project_data' not in st.session_state:
     st.session_state['project_data'] = load_project_data()
 
+# Initialize separate chat histories for each tab
+if 'chat_history_general' not in st.session_state:
+    st.session_state['chat_history_general'] = []
+
+if 'chat_history_search' not in st.session_state:
+    st.session_state['chat_history_search'] = []
+
+if 'chat_history_cv' not in st.session_state:
+    st.session_state['chat_history_cv'] = []
+
+# Keep backward compatibility
 if 'chat_history' not in st.session_state:
     st.session_state['chat_history'] = []
+
 
 if 'current_question' not in st.session_state:
     st.session_state['current_question'] = ""
@@ -2072,12 +2136,14 @@ with st.sidebar:
             for country, count in sorted_countries:
                 st.markdown(f"• {country}: {count}")
 
-# Display chat history FIRST
-for i, (user, bot) in enumerate(st.session_state['chat_history']):
+# Display chat history FIRST - show only current mode's history
+current_chat_history = get_current_chat_history()
+for i, (user, bot) in enumerate(current_chat_history):
     with st.container():
         st.markdown(f"**👤 User:** {user}")
         st.markdown(f"**🤖 Assistant:** {bot}")
         st.divider()
+
 
 # FIXED: ChatGPT-style sticky input at bottom with proper overlay
 st.markdown("""
@@ -2205,9 +2271,10 @@ if send_button and user_input.strip():
                     user_input, projects, st.session_state['chat_history']
                 )
         
-        st.session_state['chat_history'].append((user_input, response))
+        add_to_current_chat_history(user_input, response)
         st.session_state['current_question'] = ""
         st.rerun()
+
 
 # Enhanced footer with mode indication
 st.markdown("---")

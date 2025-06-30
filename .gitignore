@@ -197,3 +197,4 @@ cython_debug/
 # chroma_store
 
 .DS_Store
+.streamlit/secrets.toml

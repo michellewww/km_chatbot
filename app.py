@@ -39,10 +39,10 @@ WEBSITE_MD = "./Shared/website.md"
 USE_OPENAI = True  # Set to True to use OpenAI, False for local Ollama
 def get_openai_api_key():
     """Get OpenAI API key from environment or Streamlit secrets"""
-    api_key = os.getenv('OPENAI_API_KEY')
+    api_key = st.secrets["OPENAI_API_KEY"]
     if not api_key:
         try:
-            api_key = st.secrets.get("OPENAI_API_KEY")
+            api_key = os.getenv('OPENAI_API_KEY')
         except Exception:
             pass
     return api_key

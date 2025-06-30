@@ -204,6 +204,7 @@ def find_relevant_projects_with_gpt(projects_text: str, user_description: str, u
         Please:
         1. Carefully read through all the projects in the CV
         2. Identify which projects are relevant to the job description based on:
+           - Similar locations
            - Similar technologies/sectors
            - Similar services/roles
            - Similar project types
@@ -447,22 +448,22 @@ if st.session_state['mode'] == 'cv':
                     # Only show the generated answer if show_sections is False
                     if not show_sections:
                         st.markdown("## 🎯 Key Qualifications")
-                        st.text_area("Key Qualification Paragraphs", qualifications, height=160, disabled=False, key="qualifications_copiable")
+                        st.text_area("Key Qualification Paragraphs", qualifications, height=220, disabled=False, key="qualifications_copiable")
                         if relevant_projects:
                             st.markdown(f"## 📁 Relevant Project Experience")
                             for i, project in enumerate(relevant_projects, 1):
-                                st.text_area(f"Project {i}", project, height=180, disabled=False, key=f"relevant_project_{i}_copiable")
+                                st.text_area(f"Project {i}", project, height=200, disabled=False, key=f"relevant_project_{i}_copiable")
                         else:
                             st.info("No directly relevant projects identified.")
                         st.stop()
 
                     # If show_sections is True, display both sections and AI results below
                     st.markdown("## 🎯 Key Qualifications")
-                    st.text_area("Key Qualification Paragraphs", qualifications, height=160, disabled=False, key="qualifications_copiable_2")
+                    st.text_area("Key Qualification Paragraphs", qualifications, height=220, disabled=False, key="qualifications_copiable_2")
                     if relevant_projects:
                         st.markdown(f"## 📁 Relevant Project Experience")
                         for i, project in enumerate(relevant_projects, 1):
-                            st.text_area(f"Project {i}", project, height=180, disabled=False, key=f"relevant_project_{i}_copiable_2")
+                            st.text_area(f"Project {i}", project, height=200, disabled=False, key=f"relevant_project_{i}_copiable_2")
                     else:
                         st.info("No directly relevant projects identified.")
 

@@ -608,7 +608,7 @@ Write in third person (he/she) and make it compelling but factual.
         style = doc.styles['Normal']
         font = style.font
         font.name = 'Century Gothic'
-        font.size = Pt(11)
+        font.size = Pt(10)
         # For compatibility with some Word versions
         style.element.rPr.rFonts.set(qn('w:eastAsia'), 'Century Gothic')
 
@@ -648,7 +648,7 @@ Write in third person (he/she) and make it compelling but factual.
                 p = doc.add_paragraph(para)
                 for run in p.runs:
                     run.font.name = 'Century Gothic'
-                    run.font.size = Pt(11)
+                    run.font.size = Pt(10)
                 p.style = doc.styles['Normal']
         # Section 1: Theme 2 table and any text before Theme 3 (projects for theme 2, possible paragraph 3)
         if len(split_sections) > 1:
@@ -669,14 +669,14 @@ Write in third person (he/she) and make it compelling but factual.
                         run = cell.paragraphs[0].add_run(before + ":")
                         run.bold = True
                         run.font.name = 'Century Gothic'
-                        run.font.size = Pt(11)
+                        run.font.size = Pt(10)
                         run2 = cell.paragraphs[0].add_run(after)
                         run2.font.name = 'Century Gothic'
-                        run2.font.size = Pt(11)
+                        run2.font.size = Pt(10)
                     else:
                         run = cell.paragraphs[0].add_run(proj.strip())
                         run.font.name = 'Century Gothic'
-                        run.font.size = Pt(11)
+                        run.font.size = Pt(10)
                     if i == 0:
                         color = WHITE
                     elif i % 2 == 1:
@@ -689,7 +689,7 @@ Write in third person (he/she) and make it compelling but factual.
                 p = doc.add_paragraph(para)
                 for run in p.runs:
                     run.font.name = 'Century Gothic'
-                    run.font.size = Pt(11)
+                    run.font.size = Pt(10)
                 p.style = doc.styles['Normal']
         # Section 2: Theme 3 table and any text after (projects for theme 3, possible paragraph 4)
         if len(split_sections) > 2:
@@ -710,14 +710,14 @@ Write in third person (he/she) and make it compelling but factual.
                         run = cell.paragraphs[0].add_run(before + ":")
                         run.bold = True
                         run.font.name = 'Century Gothic'
-                        run.font.size = Pt(11)
+                        run.font.size = Pt(10)
                         run2 = cell.paragraphs[0].add_run(after)
                         run2.font.name = 'Century Gothic'
-                        run2.font.size = Pt(11)
+                        run2.font.size = Pt(10)
                     else:
                         run = cell.paragraphs[0].add_run(proj.strip())
                         run.font.name = 'Century Gothic'
-                        run.font.size = Pt(11)
+                        run.font.size = Pt(10)
                     if i == 0:
                         color = WHITE
                     elif i % 2 == 1:
@@ -730,7 +730,7 @@ Write in third person (he/she) and make it compelling but factual.
                 p = doc.add_paragraph(para)
                 for run in p.runs:
                     run.font.name = 'Century Gothic'
-                    run.font.size = Pt(11)
+                    run.font.size = Pt(10)
                 p.style = doc.styles['Normal']
 
         buffer = BytesIO()

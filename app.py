@@ -252,8 +252,9 @@ def generate_qualification_paragraphs_with_gpt(bio_text: str, relevant_projects:
         1. Bio section from a CV
         2. Relevant project experience 
         3. Job/work description
+        4. Themes of the proposal
 
-        Your task is to write 2-4 compelling qualification paragraphs that demonstrate why this person is qualified for the described work.
+        Your task is to write a four-paragraph professional bio for this individual. Use confident, professional language without exaggeration or flattery.
 
         BIO SECTION:
         {bio_text}
@@ -263,13 +264,15 @@ def generate_qualification_paragraphs_with_gpt(bio_text: str, relevant_projects:
 
         JOB/WORK DESCRIPTION:
         {user_description}
-
-        Please write 1-2 professional paragraphs (maximum 200 words total) that:
-        1. Highlight the person's most relevant qualifications for this specific work
-        2. Reference specific project experience that demonstrates relevant skills
-        3. Mention years of experience, education, or certifications if relevant
-        4. Use a confident, professional tone suitable for a proposal
-        5. Focus on why they are uniquely qualified for THIS specific assignment
+        
+        Themes of the proposal:
+        {st.session_state['extracted_themes']}
+        
+        The four paragraphs should be structured as follows:
+        1. Paragraph 1 should introduce the individual, summarizing their current role, core areas of expertise, experience with relevant power generation technologies (e.g., LNG, renewables, storage), and countries or regions where they have worked that are relevant to the proposal.
+        2. Paragraph 2 should focus on a specific theme that aligns with the needs of the proposal. After paragraph 2, insert a section listing exactly 2-3 relevant project experiences (copied verbatim from the RELEVANT PROJECT EXPERIENCE section above) that reinforce the theme stated in paragraph 2. Each project should be clearly separated and include the exact position, project name, location, year, and a short description as in the CV.
+        3. Paragraph 3 should focus on another specific theme. After paragraph 3, insert a section listing exactly 2-3 relevant project experiences (copied verbatim from the RELEVANT PROJECT EXPERIENCE section above) that reinforce the theme stated in paragraph 3. Each project should be clearly separated and include the exact position, project name, location, year, and a short description as in the CV.
+        4. Paragraph 4 should conclude the bio by summarizing how the individual's experience aligns with the proposed assignment. It should also include a brief statement of their academic background, including degrees earned, fields of study, and the institutions attended. Ensure the writing is cohesive, clear, and appropriate for inclusion in a technical or commercial proposal.
 
         Write in third person (he/she) and make it compelling but factual.
         """
@@ -289,7 +292,7 @@ def generate_qualification_paragraphs_with_gpt(bio_text: str, relevant_projects:
 
 # ---- MOVE: Button Mode Selection to sidebar top ----
 if 'mode' not in st.session_state:
-    st.session_state['mode'] = 'search'  # Default to search
+    st.session_state['mode'] = 'cv'  # Default to search
 
 # Initialize separate chat histories for each tab
 if 'chat_history_general' not in st.session_state:
@@ -359,6 +362,18 @@ with st.sidebar:
 # ---- CV MODE UI ----
 if st.session_state['mode'] == 'cv':
     st.subheader("📋 AI-Powered CV Analysis & Proposal Generation")
+    
+    with st.expander("ℹ️ About AI-Powered CV Analysis"):
+        st.markdown("""
+        **This CV analysis uses OpenAI GPT-4.1-mini to:**
+
+        1. **Intelligent Project Matching**: AI reads through all projects in the CV and identifies those most relevant to your work description
+
+        2. **Exact Text Extraction**: Relevant project descriptions are copied exactly from the CV (no summarization or modification)
+
+        3. **Smart Qualification Writing**: AI combines the candidate's bio and relevant projects to write compelling qualification paragraphs
+        """)
+        
     st.info("Upload a CV (DOCX or PDF) and describe the work requirements. AI will identify relevant projects and generate key qualification paragraphs.")
 
     if not OPENAI_API_KEY:
@@ -379,9 +394,34 @@ if st.session_state['mode'] == 'cv':
     )
 
     # NEW: Prompt revision textbox
-    default_qual_prompt = """
-    You are an expert proposal writer. I will provide you with:\n1. Bio section from a CV\n2. Relevant project experience \n3. Job/work description\n\nYour task is to write 2-4 compelling qualification paragraphs that demonstrate why this person is qualified for the described work.\n\nBIO SECTION:\n{{bio_text}}\n\nRELEVANT PROJECT EXPERIENCE:\n{{relevant_projects}}\n\nJOB/WORK DESCRIPTION:\n{{user_description}}\n\nPlease write 1-2 professional paragraphs (maximum 200 words total) that:\n1. Highlight the person's most relevant qualifications for this specific work\n2. Reference specific project experience that demonstrates relevant skills\n3. Mention years of experience, education, or certifications if relevant\n4. Use a confident, professional tone suitable for a proposal\n5. Focus on why they are uniquely qualified for THIS specific assignment\n\nWrite in third person (he/she) and make it compelling but factual.
-    """
+    default_qual_prompt = """You are an expert proposal writer. I will provide you with:
+1. Bio section from a CV
+2. Relevant project experience 
+3. Job/work description
+4. Themes of the proposal
+
+Your task is to write a four-paragraph professional bio for this individual. Use confident, professional language without exaggeration or flattery.
+
+BIO SECTION:
+{{bio_text}}
+
+RELEVANT PROJECT EXPERIENCE:
+{{relevant_projects}}
+
+JOB/WORK DESCRIPTION:
+{{user_description}}
+
+Themes of the proposal:
+{{themes}}
+
+The four paragraphs should be structured as follows:
+1. Paragraph 1 should introduce the individual, summarizing their current role, core areas of expertise, experience with relevant power generation technologies (e.g., LNG, renewables, storage), and countries or regions where they have worked that are relevant to the proposal.
+2. Paragraph 2 should focus on a specific theme that aligns with the needs of the proposal. After paragraph 2, insert a section listing exactly 2-3 relevant project experiences (copied verbatim from the RELEVANT PROJECT EXPERIENCE section above) that reinforce the theme stated in paragraph 2. Each project should be clearly separated and include the exact position, project name, location, year, and a short description as in the CV.
+3. Paragraph 3 should focus on another specific theme. After paragraph 3, insert a section listing exactly 2-3 relevant project experiences (copied verbatim from the RELEVANT PROJECT EXPERIENCE section above) that reinforce the theme stated in paragraph 3. Each project should be clearly separated and include the exact position, project name, location, year, and a short description as in the CV.
+4. Paragraph 4 should conclude the bio by summarizing how the individual's experience aligns with the proposed assignment. It should also include a brief statement of their academic background, including degrees earned, fields of study, and the institutions attended. Ensure the writing is cohesive, clear, and appropriate for inclusion in a technical or commercial proposal.
+
+Write in third person (he/she) and make it compelling but factual.
+"""
     qual_prompt = st.text_area(
         "Revise the Answer Structuring Prompt (Optional)",
         value=default_qual_prompt,
@@ -408,18 +448,24 @@ if st.session_state['mode'] == 'cv':
     # NEW: Generate CV button (will be enabled after themes are available)
     generate_cv_btn = st.button("Generate CV", type="primary", use_container_width=True, key="generate_cv_btn")
 
-    with st.expander("🔧 Advanced Settings"):
-        st.info("CV analysis uses OpenAI GPT-4.1-mini for intelligent project matching and qualification generation.")
-        show_sections = st.checkbox(
-            "Show CV Section Breakdown", 
-            value=False,
-            help="Display how the CV was separated into bio and projects sections"
-        )
-        use_gpt_processing = st.checkbox(
-            "Enable GPT Processing", 
-            value=True,
-            help="Enable AI processing with GPT-4.1-mini. If disabled, will only show document sections without AI analysis."
-        )
+    show_sections = False
+    use_gpt_processing = True
+
+    show_advanced_settings = False 
+
+    if show_advanced_settings:
+        with st.expander("🔧 Advanced Settings"):
+            st.info("CV analysis uses OpenAI GPT-4.1-mini for intelligent project matching and qualification generation.")
+            show_sections = st.checkbox(
+                "Show CV Section Breakdown", 
+                value=False,
+                help="Display how the CV was separated into bio and projects sections"
+            )
+            use_gpt_processing = st.checkbox(
+                "Enable GPT Processing", 
+                value=True,
+                help="Enable AI processing with GPT-4.1-mini. If disabled, will only show document sections without AI analysis."
+            )
 
     # NEW: Extract themes from requirements logic
     if extract_themes_btn and work_description:
@@ -488,14 +534,30 @@ if st.session_state['mode'] == 'cv':
         # For now, just append to the prompt
         final_prompt = user_prompt + f"\n\nHIGHLIGHT THESE THEMES: {user_themes}"
         # Use the custom prompt in GPT call
-        def generate_qualification_paragraphs_custom_prompt(bio_text, relevant_projects, user_description, custom_prompt, use_gpt=True):
+        def generate_qualification_paragraphs_custom_prompt(bio_text, relevant_projects, user_description, custom_prompt, user_themes, use_gpt=True):
             if not use_gpt:
                 return "Qualification generation disabled. Please enable GPT processing to generate tailored qualification paragraphs."
             if not openai_client:
                 return "Unable to generate qualifications - OpenAI API not available."
             try:
                 projects_combined = "\n\n".join(relevant_projects) if relevant_projects else "No directly relevant projects identified."
-                prompt = custom_prompt.replace("{{bio_text}}", bio_text).replace("{{relevant_projects}}", projects_combined).replace("{{user_description}}", user_description)
+                prompt = (
+                    custom_prompt
+                    .replace("{{bio_text}}", bio_text)
+                    .replace("{{relevant_projects}}", projects_combined)
+                    .replace("{{user_description}}", user_description)
+                    .replace("{{themes}}", user_themes)
+                )
+                # DEBUG: Show what is being sent to the LLM
+                # debug_info = {
+                #     "bio_text": bio_text,
+                #     "relevant_projects": relevant_projects,
+                #     "user_description": user_description,
+                #     "user_themes": user_themes,
+                #     "prompt": prompt
+                # }
+                # st.write("DEBUG LLM INPUT", debug_info)
+                # st.session_state['cv_debug_llm_input'] = debug_info
                 response = openai_client.chat.completions.create(
                     model="gpt-4.1-mini",
                     messages=[
@@ -503,12 +565,12 @@ if st.session_state['mode'] == 'cv':
                         {"role": "user", "content": prompt}
                     ],
                     temperature=0.2,
-                    max_tokens=500
+                    max_tokens=2000
                 )
                 return response.choices[0].message.content.strip()
             except Exception as e:
                 return f"Unable to generate qualifications due to API error: {str(e)}"
-        qualifications = generate_qualification_paragraphs_custom_prompt(bio_text, relevant_projects, work_description, final_prompt, use_gpt_processing)
+        qualifications = generate_qualification_paragraphs_custom_prompt(bio_text, relevant_projects, work_description, final_prompt, user_themes, use_gpt_processing)
         
         # Store results in session state to persist across reruns
         st.session_state['cv_qualifications'] = qualifications
@@ -560,16 +622,6 @@ if st.session_state['mode'] == 'cv':
     elif work_description:
         st.info("👆 Please upload a CV file to analyze")
 
-    with st.expander("ℹ️ About AI-Powered CV Analysis"):
-        st.markdown("""
-        **This CV analysis uses OpenAI GPT-4.1-mini to:**
-
-        1. **Intelligent Project Matching**: AI reads through all projects in the CV and identifies those most relevant to your work description
-
-        2. **Exact Text Extraction**: Relevant project descriptions are copied exactly from the CV (no summarization or modification)
-
-        3. **Smart Qualification Writing**: AI combines the candidate's bio and relevant projects to write compelling qualification paragraphs
-        """)
 
 # ---- EXISTING CODE CONTINUES (All the original project search functionality) ----
 
@@ -2308,23 +2360,23 @@ if st.session_state['mode'] == 'cv':
     """, unsafe_allow_html=True)
 
     # Create the fixed floating input container for CV mode
-    st.markdown('<div class="chat-input-container">', unsafe_allow_html=True)
+    # st.markdown('<div class="chat-input-container">', unsafe_allow_html=True)
 
-    col1, col2 = st.columns([5, 1])
+    # col1, col2 = st.columns([5, 1])
 
-    with col1:
-        placeholder_text = "CV analysis ready - upload file above and describe work requirements"
+    # with col1:
+    #     placeholder_text = "CV analysis ready - upload file above and describe work requirements"
         
-        cv_user_input = st.text_input(
-            "", 
-            value=st.session_state['current_question'],
-            key="cv_kb_input", 
-            placeholder=placeholder_text,
-            label_visibility="collapsed"
-        )
+    #     cv_user_input = st.text_input(
+    #         "", 
+    #         value=st.session_state['current_question'],
+    #         key="cv_kb_input", 
+    #         placeholder=placeholder_text,
+    #         label_visibility="collapsed"
+    #     )
 
-    with col2:
-        cv_send_button = st.button("Send", key="cv_kb_send", use_container_width=True)
+    # with col2:
+    #     cv_send_button = st.button("Send", key="cv_kb_send", use_container_width=True)
 
     st.markdown('</div>', unsafe_allow_html=True)
 

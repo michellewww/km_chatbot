@@ -22,10 +22,11 @@ from sklearn.metrics.pairwise import cosine_similarity
 from openai import OpenAI
 from dotenv import load_dotenv
 import shutil
+# import pysqlite3
 
-__import__('pysqlite3')
-import sys
-sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+# __import__('pysqlite3')
+# import sys
+# sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 
 # Add this at the top of your script, before other imports
 load_dotenv()
@@ -377,6 +378,36 @@ if st.session_state['mode'] == 'cv':
         help="Provide a detailed description of the work requirements. AI will match this against the CV projects."
     )
 
+    # NEW: Prompt revision textbox
+    default_qual_prompt = """
+    You are an expert proposal writer. I will provide you with:\n1. Bio section from a CV\n2. Relevant project experience \n3. Job/work description\n\nYour task is to write 2-4 compelling qualification paragraphs that demonstrate why this person is qualified for the described work.\n\nBIO SECTION:\n{{bio_text}}\n\nRELEVANT PROJECT EXPERIENCE:\n{{relevant_projects}}\n\nJOB/WORK DESCRIPTION:\n{{user_description}}\n\nPlease write 1-2 professional paragraphs (maximum 200 words total) that:\n1. Highlight the person's most relevant qualifications for this specific work\n2. Reference specific project experience that demonstrates relevant skills\n3. Mention years of experience, education, or certifications if relevant\n4. Use a confident, professional tone suitable for a proposal\n5. Focus on why they are uniquely qualified for THIS specific assignment\n\nWrite in third person (he/she) and make it compelling but factual.
+    """
+    qual_prompt = st.text_area(
+        "Revise the Answer Structuring Prompt (Optional)",
+        value=default_qual_prompt,
+        height=180,
+        help="You can revise how the answer is structured. The default is a strong proposal-style prompt."
+    )
+
+    # NEW: Extract themes button
+    extract_themes_btn = st.button("🔍 Extract Themes from Requirements", type="secondary", use_container_width=True, key="extract_themes_btn")
+
+    # NEW: Placeholder for themes extraction and revision
+    # Initialize themes in session state if not exists
+    if 'extracted_themes' not in st.session_state:
+        st.session_state['extracted_themes'] = "(Click 'Extract Themes' above to get themes from your requirements)"
+    
+    themes_text = st.text_area(
+        "Themes to Highlight (Edit before generating CV)",
+        value=st.session_state['extracted_themes'],
+        height=100,
+        key="themes_textbox",
+        help="AI will suggest themes to highlight from the project experience. You can edit these before generating the final answer."
+    )
+
+    # NEW: Generate CV button (will be enabled after themes are available)
+    generate_cv_btn = st.button("Generate CV", type="primary", use_container_width=True, key="generate_cv_btn")
+
     with st.expander("🔧 Advanced Settings"):
         st.info("CV analysis uses OpenAI GPT-4.1-mini for intelligent project matching and qualification generation.")
         show_sections = st.checkbox(
@@ -390,110 +421,139 @@ if st.session_state['mode'] == 'cv':
             help="Enable AI processing with GPT-4.1-mini. If disabled, will only show document sections without AI analysis."
         )
 
-    if uploaded_file and work_description:
-        if st.button("🤖 Analyze CV with AI", type="primary", use_container_width=True):
-            with st.spinner("🤖 Processing CV and analyzing content..."):
+    # NEW: Extract themes from requirements logic
+    if extract_themes_btn and work_description:
+        with st.spinner("🔍 Extracting themes from requirements..."):
+            def extract_themes_from_requirements(work_description, use_gpt=True):
+                if not use_gpt:
+                    return []
+                if not openai_client:
+                    st.error("OpenAI client not initialized. Please check your API key.")
+                    return []
                 try:
-                    file_content = uploaded_file.read()
-                    if uploaded_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-                        cv_text = extract_text_from_docx(file_content)
-                    elif uploaded_file.type == "application/pdf":
-                        cv_text = extract_text_from_pdf(file_content)
-                    else:
-                        st.error("Unsupported file type")
-                        st.stop()
-                    if not cv_text:
-                        st.error("Could not extract text from the uploaded file")
-                        st.stop()
-                    bio_text, projects_text = separate_cv_sections(cv_text)
-                    individual_projects = parse_projects_section(projects_text)
-
-                    if show_sections:
-                        st.markdown("## 📄 Document Sections Extracted")
-                        st.markdown("### 👤 Bio Section")
-                        with st.expander("View Bio Section", expanded=True):
-                            st.text_area("Bio Text", bio_text, height=300, disabled=True, key="bio_display")
-                        st.markdown("### 📁 Projects Section")
-                        with st.expander("View Projects Section", expanded=True):
-                            st.text_area("Projects Text", projects_text, height=400, disabled=True, key="projects_display")
-                        if individual_projects:
-                            st.markdown(f"### 📋 Individual Projects ({len(individual_projects)} projects found)")
-                            for i, project in enumerate(individual_projects, 1):
-                                with st.expander(f"Project {i}", expanded=False):
-                                    st.text_area(f"Project {i} Details", project, height=200, disabled=True, key=f"project_{i}_display")
-
-                    if not use_gpt_processing:
-                        st.success("✅ Document sections extracted successfully!")
-                        st.info("GPT processing is disabled. Enable it in Advanced Settings to get AI analysis and qualification generation.")
-                        basic_response = f"""
-                        # 📋 CV DOCUMENT ANALYSIS
-                        **Work Description:** {work_description}
-
-                        ## 📄 Document Sections Extracted
-                        - **Bio Section Length:** {len(bio_text)} characters
-                        - **Projects Section Length:** {len(projects_text)} characters
-                        - **Individual Projects Found:** {len(individual_projects)}
-
-                        *GPT processing was disabled. Enable it to get AI-powered project matching and qualification generation.*
-                        """
-                        add_to_current_chat_history(
-                            f"CV Document Analysis: {work_description}",
-                            basic_response
-                        )
-
-                        st.stop()
-
-                    # ---- GPT Processing (only once per submit) ----
-                    relevant_projects = find_relevant_projects_with_gpt(projects_text, work_description, use_gpt_processing)
-                    qualifications = generate_qualification_paragraphs_with_gpt(bio_text, relevant_projects, work_description, use_gpt_processing)
-
-                    st.success("✅ AI Analysis Complete!")
-
-                    # Only show the generated answer if show_sections is False
-                    if not show_sections:
-                        st.markdown("## 🎯 Key Qualifications")
-                        st.text_area("Key Qualification Paragraphs", qualifications, height=220, disabled=False, key="qualifications_copiable")
-                        if relevant_projects:
-                            st.markdown(f"## 📁 Relevant Project Experience")
-                            for i, project in enumerate(relevant_projects, 1):
-                                st.text_area(f"Project {i}", project, height=200, disabled=False, key=f"relevant_project_{i}_copiable")
-                        else:
-                            st.info("No directly relevant projects identified.")
-                        st.stop()
-
-                    # If show_sections is True, display both sections and AI results below
-                    st.markdown("## 🎯 Key Qualifications")
-                    st.text_area("Key Qualification Paragraphs", qualifications, height=220, disabled=False, key="qualifications_copiable_2")
-                    if relevant_projects:
-                        st.markdown(f"## 📁 Relevant Project Experience")
-                        for i, project in enumerate(relevant_projects, 1):
-                            st.text_area(f"Project {i}", project, height=200, disabled=False, key=f"relevant_project_{i}_copiable_2")
-                    else:
-                        st.info("No directly relevant projects identified.")
-
-                    add_to_current_chat_history(
-                        f"AI CV Analysis: {work_description}",
-                        qualifications + "\n\n" + "## 📁 Relevant Project Experience" + "\n\n".join(relevant_projects)
+                    prompt = f"""
+                    You are an expert CV analyst. I will provide you with a job/work description.\n\nYour task is to identify the main themes, skills, sectors, technologies, and types of experience that would be most relevant for this position.\n\nJOB/WORK DESCRIPTION:\n{work_description}\n\nPlease return a concise comma-separated list of themes (e.g., 'solar power, feasibility studies, project management, Africa, financial modeling, regulatory analysis').\nFocus on specific technical skills, sectors, technologies, and experience types that would be valuable for this role.\nDo not include generic words like 'project' or 'experience'.\n"""
+                    response = openai_client.chat.completions.create(
+                        model="gpt-4.1-mini",
+                        messages=[
+                            {"role": "system", "content": "You are an expert CV analyst specializing in extracting key themes from job requirements."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        temperature=0.1,
+                        max_tokens=200
                     )
-                    
-                    full_cv_response = f"""# 🎯 Key Qualifications
-                    {qualifications}
-
-                    ## 📁 Relevant Project Experience ({len(relevant_projects)} projects)
-
-                    """ + "\n\n".join([f"**Project {i+1}:**\n{proj}" for i, proj in enumerate(relevant_projects)])
-
-                    add_to_current_chat_history(
-                        f"CV Analysis: {uploaded_file.name} - {work_description}",
-                        full_cv_response
-                    )
-
-
+                    result = response.choices[0].message.content.strip()
+                    # Split by comma and clean
+                    themes = [t.strip() for t in result.split(',') if t.strip()]
+                    return themes
                 except Exception as e:
-                    st.error(f"Error processing CV: {str(e)}")
-                    st.error("Please check that your CV file is not corrupted and contains readable text.")
-                    import traceback
-                    st.error(f"Detailed error: {traceback.format_exc()}")
+                    st.error(f"Error calling OpenAI API for theme extraction: {e}")
+                    return []
+
+            themes = extract_themes_from_requirements(work_description, use_gpt_processing)
+            if themes:
+                st.session_state['extracted_themes'] = ', '.join(themes)
+                st.success(f"✅ Extracted {len(themes)} themes from requirements!")
+                st.rerun()
+            else:
+                st.error("No themes could be extracted. Please check your requirements description or try again.")
+
+    if uploaded_file and work_description:
+        # This section is now handled by the Extract Themes and Generate CV buttons
+        pass
+
+    # --- NEW: Generate CV button logic ---
+    if generate_cv_btn and uploaded_file and work_description and st.session_state.get('extracted_themes') and st.session_state['extracted_themes'] != "(Click 'Extract Themes' above to get themes from your requirements)":
+        # Use the user-edited themes
+        user_themes = st.session_state.get('extracted_themes')
+        # Use the user-edited prompt
+        user_prompt = qual_prompt
+        # Use the previously extracted bio_text, individual_projects, etc.
+        # For now, re-extract (could be optimized with session state)
+        file_content = uploaded_file.read()
+        if uploaded_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+            cv_text = extract_text_from_docx(file_content)
+        elif uploaded_file.type == "application/pdf":
+            cv_text = extract_text_from_pdf(file_content)
+        else:
+            st.error("Unsupported file type")
+            st.stop()
+        if not cv_text:
+            st.error("Could not extract text from the uploaded file")
+            st.stop()
+        bio_text, projects_text = separate_cv_sections(cv_text)
+        individual_projects = parse_projects_section(projects_text)
+        relevant_projects = find_relevant_projects_with_gpt(projects_text, work_description, use_gpt_processing)
+        # Insert the user themes into the prompt if needed
+        # For now, just append to the prompt
+        final_prompt = user_prompt + f"\n\nHIGHLIGHT THESE THEMES: {user_themes}"
+        # Use the custom prompt in GPT call
+        def generate_qualification_paragraphs_custom_prompt(bio_text, relevant_projects, user_description, custom_prompt, use_gpt=True):
+            if not use_gpt:
+                return "Qualification generation disabled. Please enable GPT processing to generate tailored qualification paragraphs."
+            if not openai_client:
+                return "Unable to generate qualifications - OpenAI API not available."
+            try:
+                projects_combined = "\n\n".join(relevant_projects) if relevant_projects else "No directly relevant projects identified."
+                prompt = custom_prompt.replace("{{bio_text}}", bio_text).replace("{{relevant_projects}}", projects_combined).replace("{{user_description}}", user_description)
+                response = openai_client.chat.completions.create(
+                    model="gpt-4.1-mini",
+                    messages=[
+                        {"role": "system", "content": "You are an expert proposal writer specializing in highlighting candidate qualifications for infrastructure and consulting projects."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.2,
+                    max_tokens=500
+                )
+                return response.choices[0].message.content.strip()
+            except Exception as e:
+                return f"Unable to generate qualifications due to API error: {str(e)}"
+        qualifications = generate_qualification_paragraphs_custom_prompt(bio_text, relevant_projects, work_description, final_prompt, use_gpt_processing)
+        
+        # Store results in session state to persist across reruns
+        st.session_state['cv_qualifications'] = qualifications
+        st.session_state['cv_relevant_projects'] = relevant_projects
+        st.session_state['cv_generated'] = True
+        
+        st.success("✅ AI Analysis Complete!")
+        st.rerun()
+
+    # --- NEW: Download as Word document button (outside conditional block) ---
+    if st.session_state.get('cv_generated', False):
+        st.markdown("---")
+        st.markdown("## 📄 Generated CV")
+        
+        # Re-display the results
+        st.markdown("### 🎯 Key Qualifications")
+        st.text_area("Key Qualification Paragraphs", st.session_state.get('cv_qualifications', ''), height=220, disabled=False, key="qualifications_display")
+        
+        relevant_projects = st.session_state.get('cv_relevant_projects', [])
+        if relevant_projects:
+            st.markdown(f"### 📁 Relevant Project Experience")
+            for i, project in enumerate(relevant_projects, 1):
+                st.text_area(f"Project {i}", project, height=200, disabled=False, key=f"relevant_project_{i}_display")
+        else:
+            st.info("No directly relevant projects identified.")
+        
+        # Download button
+        from docx import Document
+        from io import BytesIO
+        doc = Document()
+        doc.add_heading('Key Qualifications', level=1)
+        doc.add_paragraph(st.session_state.get('cv_qualifications', ''))
+        doc.add_heading('Relevant Project Experience', level=2)
+        for i, project in enumerate(relevant_projects, 1):
+            doc.add_heading(f'Project {i}', level=3)
+            doc.add_paragraph(project)
+        buffer = BytesIO()
+        doc.save(buffer)
+        buffer.seek(0)
+        st.download_button(
+            label="Download as Word Document",
+            data=buffer,
+            file_name="KM_CV_Qualifications.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
 
     elif uploaded_file:
         st.info("👆 Please describe the work requirements to analyze the CV")

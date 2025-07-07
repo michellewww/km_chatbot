@@ -612,7 +612,8 @@ Write in third person (he/she) and make it compelling but factual.
         # For compatibility with some Word versions
         style.element.rPr.rFonts.set(qn('w:eastAsia'), 'Century Gothic')
 
-        doc.add_heading('Key Qualifications', level=1)
+        # add body text "Key Qualifications"
+        doc.add_paragraph('Key Qualifications')
         qualifications = st.session_state.get('cv_qualifications', '')
 
         # --- FIX: Output each table immediately after its associated paragraphs ---
@@ -631,6 +632,16 @@ Write in third person (he/she) and make it compelling but factual.
             # Any non-empty lines left are paragraphs
             paras = [p.strip() for p in cleaned.split('\n') if p.strip()]
             return projects, paras
+        # Helper to set cell background color
+        def set_cell_background(cell, color_hex):
+            from docx.oxml import parse_xml
+            from docx.oxml.ns import nsdecls
+            cell._tc.get_or_add_tcPr().append(
+                parse_xml(r'<w:shd {} w:fill="{}"/>'.format(nsdecls('w'), color_hex))
+            )
+        DARK_BLUE = '002060'      # Dark blue, accent 1
+        LIGHT_BLUE = 'C6D9F1'     # Blue, accent 1, lighter 80%
+        WHITE = 'FFFFFF'
         # Section 0: before Theme 2 (paragraphs 1 and 2)
         if len(split_sections) > 0:
             for para in [p.strip() for p in split_sections[0].split('\n') if p.strip()]:
@@ -643,15 +654,36 @@ Write in third person (he/she) and make it compelling but factual.
         if len(split_sections) > 1:
             theme2_projects, theme2_paras = extract_projects_and_text(split_sections[1])
             if theme2_projects:
-                table = doc.add_table(rows=len(theme2_projects), cols=1)
+                table = doc.add_table(rows=len(theme2_projects)+1, cols=1)
                 table.style = 'Table Grid'
+                # First row: empty, dark blue
+                cell = table.cell(0, 0)
+                cell.text = ''
+                set_cell_background(cell, DARK_BLUE)
+                # Project rows: alternate white and light blue, starting from second project row (i=1)
                 for i, proj in enumerate(theme2_projects):
-                    cell = table.cell(i, 0)
-                    cell.text = proj.strip()
-                    for paragraph in cell.paragraphs:
-                        for run in paragraph.runs:
-                            run.font.name = 'Century Gothic'
-                            run.font.size = Pt(11)
+                    cell = table.cell(i+1, 0)
+                    cell.text = ''  # Clear cell
+                    if ":" in proj:
+                        before, after = proj.split(":", 1)
+                        run = cell.paragraphs[0].add_run(before + ":")
+                        run.bold = True
+                        run.font.name = 'Century Gothic'
+                        run.font.size = Pt(11)
+                        run2 = cell.paragraphs[0].add_run(after)
+                        run2.font.name = 'Century Gothic'
+                        run2.font.size = Pt(11)
+                    else:
+                        run = cell.paragraphs[0].add_run(proj.strip())
+                        run.font.name = 'Century Gothic'
+                        run.font.size = Pt(11)
+                    if i == 0:
+                        color = WHITE
+                    elif i % 2 == 1:
+                        color = LIGHT_BLUE
+                    else:
+                        color = WHITE
+                    set_cell_background(cell, color)
                 doc.add_paragraph('')  # Add space after table
             for para in theme2_paras:
                 p = doc.add_paragraph(para)
@@ -663,15 +695,36 @@ Write in third person (he/she) and make it compelling but factual.
         if len(split_sections) > 2:
             theme3_projects, theme3_paras = extract_projects_and_text(split_sections[2])
             if theme3_projects:
-                table = doc.add_table(rows=len(theme3_projects), cols=1)
+                table = doc.add_table(rows=len(theme3_projects)+1, cols=1)
                 table.style = 'Table Grid'
+                # First row: empty, dark blue
+                cell = table.cell(0, 0)
+                cell.text = ''
+                set_cell_background(cell, DARK_BLUE)
+                # Project rows: alternate white and light blue, starting from second project row (i=1)
                 for i, proj in enumerate(theme3_projects):
-                    cell = table.cell(i, 0)
-                    cell.text = proj.strip()
-                    for paragraph in cell.paragraphs:
-                        for run in paragraph.runs:
-                            run.font.name = 'Century Gothic'
-                            run.font.size = Pt(11)
+                    cell = table.cell(i+1, 0)
+                    cell.text = ''  # Clear cell
+                    if ":" in proj:
+                        before, after = proj.split(":", 1)
+                        run = cell.paragraphs[0].add_run(before + ":")
+                        run.bold = True
+                        run.font.name = 'Century Gothic'
+                        run.font.size = Pt(11)
+                        run2 = cell.paragraphs[0].add_run(after)
+                        run2.font.name = 'Century Gothic'
+                        run2.font.size = Pt(11)
+                    else:
+                        run = cell.paragraphs[0].add_run(proj.strip())
+                        run.font.name = 'Century Gothic'
+                        run.font.size = Pt(11)
+                    if i == 0:
+                        color = WHITE
+                    elif i % 2 == 1:
+                        color = LIGHT_BLUE
+                    else:
+                        color = WHITE
+                    set_cell_background(cell, color)
                 doc.add_paragraph('')  # Add space after table
             for para in theme3_paras:
                 p = doc.add_paragraph(para)

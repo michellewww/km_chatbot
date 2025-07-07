@@ -270,8 +270,8 @@ def generate_qualification_paragraphs_with_gpt(bio_text: str, relevant_projects:
         
         The four paragraphs should be structured as follows:
         1. Paragraph 1 should introduce the individual, summarizing their current role, core areas of expertise, experience with relevant power generation technologies (e.g., LNG, renewables, storage), and countries or regions where they have worked that are relevant to the proposal.
-        2. Paragraph 2 should focus on a specific theme that aligns with the needs of the proposal. After paragraph 2, insert a section listing exactly 2-3 relevant project experiences (copied verbatim from the RELEVANT PROJECT EXPERIENCE section above) that reinforce the theme stated in paragraph 2. Each project should be clearly separated and include the exact position, project name, location, year, and a short description as in the CV.
-        3. Paragraph 3 should focus on another specific theme. After paragraph 3, insert a section listing exactly 2-3 relevant project experiences (copied verbatim from the RELEVANT PROJECT EXPERIENCE section above) that reinforce the theme stated in paragraph 3. Each project should be clearly separated and include the exact position, project name, location, year, and a short description as in the CV.
+        2. Paragraph 2 should focus on a specific theme that aligns with the needs of the proposal. After paragraph 2, insert a section titled ===Relevant Project Experience for Theme 2=== and then output a table as follows: For each of exactly 2-3 relevant project experiences (copied verbatim from the RELEVANT PROJECT EXPERIENCE section above) that reinforce the theme stated in paragraph 2, output a line starting with >>>PROJECT_START<<< and ending with >>>PROJECT_END<<<, with the project description in between. Each project should be clearly separated and include the exact position, project name, location, year, and a short description as in the CV.
+        3. Paragraph 3 should focus on another specific theme. After paragraph 3, insert a section titled ===Relevant Project Experience for Theme 3=== and then output a table as follows: For each of exactly 2-3 relevant project experiences (copied verbatim from the RELEVANT PROJECT EXPERIENCE section above) that reinforce the theme stated in paragraph 3, output a line starting with >>>PROJECT_START<<< and ending with >>>PROJECT_END<<<, with the project description in between. Each project should be clearly separated and include the exact position, project name, location, year, and a short description as in the CV (if the tense in the project description is not past tense, change it to past tense, but keep the exact project description as in the CV).
         4. Paragraph 4 should conclude the bio by summarizing how the individual's experience aligns with the proposed assignment. It should also include a brief statement of their academic background, including degrees earned, fields of study, and the institutions attended. Ensure the writing is cohesive, clear, and appropriate for inclusion in a technical or commercial proposal.
 
         Write in third person (he/she) and make it compelling but factual.
@@ -416,8 +416,8 @@ Themes of the proposal:
 
 The four paragraphs should be structured as follows:
 1. Paragraph 1 should introduce the individual, summarizing their current role, core areas of expertise, experience with relevant power generation technologies (e.g., LNG, renewables, storage), and countries or regions where they have worked that are relevant to the proposal.
-2. Paragraph 2 should focus on a specific theme that aligns with the needs of the proposal. After paragraph 2, insert a section listing exactly 2-3 relevant project experiences (copied verbatim from the RELEVANT PROJECT EXPERIENCE section above) that reinforce the theme stated in paragraph 2. Each project should be clearly separated and include the exact position, project name, location, year, and a short description as in the CV.
-3. Paragraph 3 should focus on another specific theme. After paragraph 3, insert a section listing exactly 2-3 relevant project experiences (copied verbatim from the RELEVANT PROJECT EXPERIENCE section above) that reinforce the theme stated in paragraph 3. Each project should be clearly separated and include the exact position, project name, location, year, and a short description as in the CV.
+2. Paragraph 2 should focus on a specific theme that aligns with the needs of the proposal. After paragraph 2, insert a section titled ===Relevant Project Experience for Theme 2=== and then output a table as follows: For each of exactly 2-3 relevant project experiences (copied verbatim from the RELEVANT PROJECT EXPERIENCE section above) that reinforce the theme stated in paragraph 2, output a line starting with >>>PROJECT_START<<< and ending with >>>PROJECT_END<<<, with the project description in between. Each project should be clearly separated and include the exact position, project name, location, year, and a short description as in the CV.
+3. Paragraph 3 should focus on another specific theme. After paragraph 3, insert a section titled ===Relevant Project Experience for Theme 3=== and then output a table as follows: For each of exactly 2-3 relevant project experiences (copied verbatim from the RELEVANT PROJECT EXPERIENCE section above) that reinforce the theme stated in paragraph 3, output a line starting with >>>PROJECT_START<<< and ending with >>>PROJECT_END<<<, with the project description in between. Each project should be clearly separated and include the exact position, project name, location, year, and a short description as in the CV (if the tense in the project description is not past tense, change it to past tense, but keep the exact project description as in the CV).
 4. Paragraph 4 should conclude the bio by summarizing how the individual's experience aligns with the proposed assignment. It should also include a brief statement of their academic background, including degrees earned, fields of study, and the institutions attended. Ensure the writing is cohesive, clear, and appropriate for inclusion in a technical or commercial proposal.
 
 Write in third person (he/she) and make it compelling but factual.
@@ -565,7 +565,7 @@ Write in third person (he/she) and make it compelling but factual.
                         {"role": "user", "content": prompt}
                     ],
                     temperature=0.2,
-                    max_tokens=2000
+                    max_tokens=3000
                 )
                 return response.choices[0].message.content.strip()
             except Exception as e:
@@ -599,14 +599,87 @@ Write in third person (he/she) and make it compelling but factual.
         
         # Download button
         from docx import Document
+        from docx.shared import Pt
+        from docx.oxml.ns import qn
+        from docx.oxml import OxmlElement
         from io import BytesIO
         doc = Document()
+        # Set default font for the document to Century Gothic
+        style = doc.styles['Normal']
+        font = style.font
+        font.name = 'Century Gothic'
+        font.size = Pt(11)
+        # For compatibility with some Word versions
+        style.element.rPr.rFonts.set(qn('w:eastAsia'), 'Century Gothic')
+
         doc.add_heading('Key Qualifications', level=1)
-        doc.add_paragraph(st.session_state.get('cv_qualifications', ''))
-        doc.add_heading('Relevant Project Experience', level=2)
-        for i, project in enumerate(relevant_projects, 1):
-            doc.add_heading(f'Project {i}', level=3)
-            doc.add_paragraph(project)
+        qualifications = st.session_state.get('cv_qualifications', '')
+
+        # --- FIX: Output each table immediately after its associated paragraphs ---
+        import re
+        qualifications = st.session_state.get('cv_qualifications', '')
+        # Split on the theme markers
+        split_sections = re.split(r'===Relevant Project Experience for Theme 2===|===Relevant Project Experience for Theme 3===', qualifications)
+        # There can be up to 3 sections: [before Theme 2, between Theme 2 and 3, after Theme 3]
+        def extract_projects_and_text(section_text):
+            if not section_text:
+                return [], []
+            # Find all project blocks
+            projects = re.findall(r'>>>PROJECT_START<<<(.*?)>>>PROJECT_END<<<', section_text, re.DOTALL)
+            # Remove all project blocks from the section
+            cleaned = re.sub(r'>>>PROJECT_START<<<.*?>>>PROJECT_END<<<', '', section_text, flags=re.DOTALL)
+            # Any non-empty lines left are paragraphs
+            paras = [p.strip() for p in cleaned.split('\n') if p.strip()]
+            return projects, paras
+        # Section 0: before Theme 2 (paragraphs 1 and 2)
+        if len(split_sections) > 0:
+            for para in [p.strip() for p in split_sections[0].split('\n') if p.strip()]:
+                p = doc.add_paragraph(para)
+                for run in p.runs:
+                    run.font.name = 'Century Gothic'
+                    run.font.size = Pt(11)
+                p.style = doc.styles['Normal']
+        # Section 1: Theme 2 table and any text before Theme 3 (projects for theme 2, possible paragraph 3)
+        if len(split_sections) > 1:
+            theme2_projects, theme2_paras = extract_projects_and_text(split_sections[1])
+            if theme2_projects:
+                table = doc.add_table(rows=len(theme2_projects), cols=1)
+                table.style = 'Table Grid'
+                for i, proj in enumerate(theme2_projects):
+                    cell = table.cell(i, 0)
+                    cell.text = proj.strip()
+                    for paragraph in cell.paragraphs:
+                        for run in paragraph.runs:
+                            run.font.name = 'Century Gothic'
+                            run.font.size = Pt(11)
+                doc.add_paragraph('')  # Add space after table
+            for para in theme2_paras:
+                p = doc.add_paragraph(para)
+                for run in p.runs:
+                    run.font.name = 'Century Gothic'
+                    run.font.size = Pt(11)
+                p.style = doc.styles['Normal']
+        # Section 2: Theme 3 table and any text after (projects for theme 3, possible paragraph 4)
+        if len(split_sections) > 2:
+            theme3_projects, theme3_paras = extract_projects_and_text(split_sections[2])
+            if theme3_projects:
+                table = doc.add_table(rows=len(theme3_projects), cols=1)
+                table.style = 'Table Grid'
+                for i, proj in enumerate(theme3_projects):
+                    cell = table.cell(i, 0)
+                    cell.text = proj.strip()
+                    for paragraph in cell.paragraphs:
+                        for run in paragraph.runs:
+                            run.font.name = 'Century Gothic'
+                            run.font.size = Pt(11)
+                doc.add_paragraph('')  # Add space after table
+            for para in theme3_paras:
+                p = doc.add_paragraph(para)
+                for run in p.runs:
+                    run.font.name = 'Century Gothic'
+                    run.font.size = Pt(11)
+                p.style = doc.styles['Normal']
+
         buffer = BytesIO()
         doc.save(buffer)
         buffer.seek(0)

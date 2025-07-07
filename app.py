@@ -2201,7 +2201,34 @@ with st.sidebar:
             for country, count in sorted_countries:
                 st.markdown(f"• {country}: {count}")
 
-# Display chat history FIRST - show only current mode's history
+# Add input box at the top for General and Search modes
+if st.session_state['mode'] in ['general', 'search']:
+    st.markdown("---")
+    st.subheader("💬 Ask a Question")
+    
+    col1, col2 = st.columns([5, 1])
+    
+    with col1:
+        # Dynamic placeholder based on mode
+        if st.session_state['mode'] == 'search':
+            placeholder_text = "Search K&M projects... (e.g., 'Give me LNG projects in United States')"
+        else:  # general mode
+            placeholder_text = "Ask about K&M's services... (e.g., 'What services does K&M provide?')"
+        
+        user_input = st.text_input(
+            "", 
+            value=st.session_state['current_question'],
+            key="kb_input", 
+            placeholder=placeholder_text,
+            label_visibility="collapsed"
+        )
+    
+    with col2:
+        send_button = st.button("Send", key="kb_send", use_container_width=True)
+    
+    st.markdown("---")
+
+# Display chat history - show only current mode's history
 current_chat_history = get_current_chat_history()
 for i, (user, bot) in enumerate(current_chat_history):
     with st.container():
@@ -2209,111 +2236,102 @@ for i, (user, bot) in enumerate(current_chat_history):
         st.markdown(f"**🤖 Assistant:** {bot}")
         st.divider()
 
-
-# FIXED: ChatGPT-style sticky input at bottom with proper overlay
-st.markdown("""
-<style>
-/* Add bottom padding to main content to avoid overlap with fixed input */
-.main .block-container {
-    padding-bottom: 120px !important;
-}
-
-/* Fixed floating input container */
-.chat-input-container {
-    position: fixed !important;
-    bottom: 0 !important;
-    left: 0 !important;
-    right: 0 !important;
-    background: white !important;
-    border-top: 1px solid #e0e0e0 !important;
-    padding: 15px 20px !important;
-    z-index: 999 !important;
-    box-shadow: 0 -2px 10px rgba(0,0,0,0.1) !important;
-}
-
-/* Dark mode support */
-@media (prefers-color-scheme: dark) {
-    .chat-input-container {
-        background: #0e1117 !important;
-        border-top: 1px solid #262730 !important;
-    
+# Add fixed input at bottom only for CV mode
+if st.session_state['mode'] == 'cv':
+    # FIXED: ChatGPT-style sticky input at bottom with proper overlay for CV mode
+    st.markdown("""
+    <style>
+    /* Add bottom padding to main content to avoid overlap with fixed input */
+    .main .block-container {
+        padding-bottom: 120px !important;
     }
-}
 
-/* Hide default streamlit input styling */
-.stTextInput > label {
-    display: none !important;
-}
+    /* Fixed floating input container */
+    .chat-input-container {
+        position: fixed !important;
+        bottom: 0 !important;
+        left: 0 !important;
+        right: 0 !important;
+        background: white !important;
+        border-top: 1px solid #e0e0e0 !important;
+        padding: 15px 20px !important;
+        z-index: 999 !important;
+        box-shadow: 0 -2px 10px rgba(0,0,0,0.1) !important;
+    }
 
-/* Ensure input takes full width in container */
-.chat-input-container .stTextInput {
-    margin-bottom: 0 !important;
-}
+    /* Dark mode support */
+    @media (prefers-color-scheme: dark) {
+        .chat-input-container {
+            background: #0e1117 !important;
+            border-top: 1px solid #262730 !important;
+        }
+    }
 
-/* Style the input field */
-.chat-input-container input {
-    border-radius: 25px !important;
-    border: 2px solid #e0e0e0 !important;
-    padding: 12px 20px !important;
-    font-size: 16px !important;
-}
+    /* Hide default streamlit input styling */
+    .stTextInput > label {
+        display: none !important;
+    }
 
-.chat-input-container input:focus {
-    border-color: #ff4b4b !important;
-    box-shadow: 0 0 0 2px rgba(255, 75, 75, 0.2) !important;
-}
+    /* Ensure input takes full width in container */
+    .chat-input-container .stTextInput {
+        margin-bottom: 0 !important;
+    }
 
-/* Style the send button */
-.chat-input-container .stButton button {
-    border-radius: 25px !important;
-    height: 48px !important;
-    background: #ff4b4b !important;
-    border: none !important;
-    color: white !important;
-    font-weight: 600 !important;
-}
+    /* Style the input field */
+    .chat-input-container input {
+        border-radius: 25px !important;
+        border: 2px solid #e0e0e0 !important;
+        padding: 12px 20px !important;
+        font-size: 16px !important;
+    }
 
-.chat-input-container .stButton button:hover {
-    background: #ff3333 !important;
-    transform: translateY(-1px) !important;
-}
-</style>
-""", unsafe_allow_html=True)
+    .chat-input-container input:focus {
+        border-color: #ff4b4b !important;
+        box-shadow: 0 0 0 2px rgba(255, 75, 75, 0.2) !important;
+    }
 
-# Create the fixed floating input container
-st.markdown('<div class="chat-input-container">', unsafe_allow_html=True)
+    /* Style the send button */
+    .chat-input-container .stButton button {
+        border-radius: 25px !important;
+        height: 48px !important;
+        background: #ff4b4b !important;
+        border: none !important;
+        color: white !important;
+        font-weight: 600 !important;
+    }
 
-col1, col2 = st.columns([5, 1])
+    .chat-input-container .stButton button:hover {
+        background: #ff3333 !important;
+        transform: translateY(-1px) !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
-with col1:
-    # Dynamic placeholder based on mode
-    if st.session_state['mode'] == 'search':
-        placeholder_text = "Search K&M projects... (e.g., 'Give me LNG projects in United States')"
-    elif st.session_state['mode'] == 'general':
-        placeholder_text = "Ask about K&M's services... (e.g., 'What services does K&M provide?')"
-    else:  # CV mode
+    # Create the fixed floating input container for CV mode
+    st.markdown('<div class="chat-input-container">', unsafe_allow_html=True)
+
+    col1, col2 = st.columns([5, 1])
+
+    with col1:
         placeholder_text = "CV analysis ready - upload file above and describe work requirements"
-    
-    user_input = st.text_input(
-        "", 
-        value=st.session_state['current_question'],
-        key="kb_input", 
-        placeholder=placeholder_text,
-        label_visibility="collapsed"
-    )
+        
+        cv_user_input = st.text_input(
+            "", 
+            value=st.session_state['current_question'],
+            key="cv_kb_input", 
+            placeholder=placeholder_text,
+            label_visibility="collapsed"
+        )
 
-with col2:
-    send_button = st.button("Send", key="kb_send", use_container_width=True)
+    with col2:
+        cv_send_button = st.button("Send", key="cv_kb_send", use_container_width=True)
 
-st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
 # Process input based on mode
-if send_button and user_input.strip():
-    if st.session_state['mode'] == 'cv':
-        # CV mode - handled above in the CV section
-        st.info("Please use the CV analysis section above to upload a file and describe work requirements.")
-    
-    elif st.session_state['project_data']:
+# Handle top input for general and search modes
+if 'send_button' in locals() and send_button and user_input.strip():
+    if st.session_state['project_data']:
         projects = st.session_state['project_data'].get('projects', [])
         
         if st.session_state['mode'] == 'search':
@@ -2339,6 +2357,12 @@ if send_button and user_input.strip():
         add_to_current_chat_history(user_input, response)
         st.session_state['current_question'] = ""
         st.rerun()
+
+# Handle bottom input for CV mode
+if 'cv_send_button' in locals() and cv_send_button and cv_user_input.strip():
+    if st.session_state['mode'] == 'cv':
+        # CV mode - handled above in the CV section
+        st.info("Please use the CV analysis section above to upload a file and describe work requirements.")
 
 
 # Enhanced footer with mode indication

@@ -2211,173 +2211,169 @@ with st.sidebar:
                 st.rerun()
     
     else:  # CV mode
-        st.subheader("💡 CV Analysis Examples")
-        cv_examples = [
-            "Senior consultant for 100MW solar project feasibility study",
-            "Project manager for LNG terminal development in Africa",
-            "Due diligence expert for renewable energy investments",
-            "Lender's engineer for power plant construction",
-            "Financial advisor for infrastructure PPP projects",
-            "Technical expert for water treatment facility",
-            "Transaction advisor for energy sector M&A",
-            "Regulatory consultant for power sector reform"
-        ]
-        
-        st.info("Upload a CV file and use descriptions like:")
-        for example in cv_examples:
-            st.caption(f"• {example}")
+        st.subheader("💡 Instructions")
+        st.markdown("""
+            1. Upload a CV file.
+            2. Paste project requirements.
+            3. Modify the prompt if needed.
+            4. Modify the themes if needed.
+            5. Download as a Word Document.
+            """)
+
+
     
     st.divider()
     
     # Show client database info
-    if st.session_state['project_data']:
-        projects = st.session_state['project_data'].get('projects', [])
-        client_list = generate_client_list(projects)
-        
-        st.subheader("🏢 Client Database")
-        st.metric("Available Clients", len(client_list))
-        
-    # Enhanced category reference guide with complete country list
-    st.subheader("📚 Search Categories & Coverage")
+    if st.session_state['mode'] != 'cv':
+        if st.session_state['project_data']:
+            projects = st.session_state['project_data'].get('projects', [])
+            client_list = generate_client_list(projects)
+            
+            st.subheader("🏢 Client Database")
+            st.metric("Available Clients", len(client_list))
+            
+        # Enhanced category reference guide with complete country list
+        st.subheader("📚 Search Categories & Coverage")
     
-    with st.expander("🌍 Available Countries by Region"):
-        st.markdown("""
-        **🌎 Latin America & Caribbean (33 countries):**
-        - Argentina, Brazil, Chile, Colombia, Mexico, Peru
-        - Jamaica, Dominican Republic, Trinidad & Tobago
-        - Costa Rica, Panama, Ecuador, Venezuela, Uruguay
-        - Aruba, Curacao, Barbados, Bahamas, Belize
-        - And 14 more Caribbean nations...
-        
-        **🌍 Sub-Saharan Africa (24 countries):**
-        - Nigeria, Kenya, South Africa, Ghana, Tanzania
-        - Botswana, Namibia, Zambia, Zimbabwe, Uganda
-        - Senegal, Mali, Guinea, Liberia, Sierra Leone
-        - And 9 more African nations...
-        
-        **🌏 East Asia & Pacific (10 countries):**
-        - China, Indonesia, Philippines, Vietnam, Thailand
-        - Malaysia, Korea, Mongolia, Laos, Guam
-        
-        **🌍 Europe & Central Asia (16 countries):**
-        - Germany, Netherlands, Poland, Turkey, Russia
-        - Austria, Bulgaria, Czech Republic, Hungary
-        - And 7 more European nations...
-        
-        **🌍 South Asia (6 countries):**
-        - India, Pakistan, Bangladesh, Sri Lanka
-        - Nepal, Maldives
-        
-        **🌍 Middle East & North Africa (8 countries):**
-        - Saudi Arabia, Egypt, Morocco, Turkey, Yemen
-        - Jordan, Lebanon, Oman, Tunisia
-        
-        **🌎 North America (2 countries):**
-        - United States, Canada
-        """)
+        with st.expander("🌍 Available Countries by Region"):
+            st.markdown("""
+            **🌎 Latin America & Caribbean (33 countries):**
+            - Argentina, Brazil, Chile, Colombia, Mexico, Peru
+            - Jamaica, Dominican Republic, Trinidad & Tobago
+            - Costa Rica, Panama, Ecuador, Venezuela, Uruguay
+            - Aruba, Curacao, Barbados, Bahamas, Belize
+            - And 14 more Caribbean nations...
+            
+            **🌍 Sub-Saharan Africa (24 countries):**
+            - Nigeria, Kenya, South Africa, Ghana, Tanzania
+            - Botswana, Namibia, Zambia, Zimbabwe, Uganda
+            - Senegal, Mali, Guinea, Liberia, Sierra Leone
+            - And 9 more African nations...
+            
+            **🌏 East Asia & Pacific (10 countries):**
+            - China, Indonesia, Philippines, Vietnam, Thailand
+            - Malaysia, Korea, Mongolia, Laos, Guam
+            
+            **🌍 Europe & Central Asia (16 countries):**
+            - Germany, Netherlands, Poland, Turkey, Russia
+            - Austria, Bulgaria, Czech Republic, Hungary
+            - And 7 more European nations...
+            
+            **🌍 South Asia (6 countries):**
+            - India, Pakistan, Bangladesh, Sri Lanka
+            - Nepal, Maldives
+            
+            **🌍 Middle East & North Africa (8 countries):**
+            - Saudi Arabia, Egypt, Morocco, Turkey, Yemen
+            - Jordan, Lebanon, Oman, Tunisia
+            
+            **🌎 North America (2 countries):**
+            - United States, Canada
+            """)
     
-    with st.expander("🌍 Regions & Abbreviations"):
-        st.markdown("""
-        - **EAP**: East Asia and Pacific
-        - **ECA**: Europe and Central Asia  
-        - **LAC**: Latin America and the Caribbean
-        - **MENA**: Middle East and North Africa
-        - **NA**: North America
-        - **SA**: South Asia
-        - **SSA**: Sub Saharan Africa
-        - **Global**: Worldwide/International projects
-        """)
+        with st.expander("🌍 Regions & Abbreviations"):
+            st.markdown("""
+            - **EAP**: East Asia and Pacific
+            - **ECA**: Europe and Central Asia  
+            - **LAC**: Latin America and the Caribbean
+            - **MENA**: Middle East and North Africa
+            - **NA**: North America
+            - **SA**: South Asia
+            - **SSA**: Sub Saharan Africa
+            - **Global**: Worldwide/International projects
+            """)
+        
+        with st.expander("⚡ Sectors & Technologies"):
+            st.markdown("""
+            **Energy Sectors:**
+            - **Renewable**: Solar, Wind, Hydro, Geothermal, Biomass
+            - **Conventional**: Natural Gas, Coal, Nuclear, Oil
+            - **Storage**: BESS, Grid Storage, Pumped Hydro
+            - **Hydrogen**: Green H2, Blue H2, Fuel Cells
+            - **LNG to Power**: Gas-to-Power, LNG Terminals
+            - **Infrastructure**: Water, Wastewater, Transport
+            
+            **Key Technologies:**
+            - Solar: PV, CSP, Distributed Solar
+            - Wind: Onshore, Offshore, Small Wind
+            - Gas: CCGT, OCGT, Cogeneration, LNG
+            - Nuclear: Nuclear Power, Atomic Energy
+            - Storage: Lithium-ion, Flow Batteries
+            - Hydro: Large, Small, Pumped Storage
+            """)
+        
+        with st.expander("📋 Services & Clients"):
+            st.markdown("""
+            **Services:**
+            - **DD**: Due Diligence (Technical, Commercial, Environmental)
+            - **FS**: Feasibility Study (Pre-feasibility, Bankability)
+            - **LE**: Lender's Engineer (Independent Engineer)
+            - **OE**: Owner's Engineer (Project Management)
+            - **TA**: Transaction Advisory (M&A, Investment)
+            - **Dev**: Project Development & Structuring
+            - **Policy**: Regulatory & Policy Analysis
+            
+            **Client Search Features:**
+            - Fuzzy matching for client names
+            - Handles abbreviations (WB → World Bank)
+            - Dynamic client list from database
+            - Case-insensitive search
+            """)
+        
+        st.divider()
     
-    with st.expander("⚡ Sectors & Technologies"):
-        st.markdown("""
-        **Energy Sectors:**
-        - **Renewable**: Solar, Wind, Hydro, Geothermal, Biomass
-        - **Conventional**: Natural Gas, Coal, Nuclear, Oil
-        - **Storage**: BESS, Grid Storage, Pumped Hydro
-        - **Hydrogen**: Green H2, Blue H2, Fuel Cells
-        - **LNG to Power**: Gas-to-Power, LNG Terminals
-        - **Infrastructure**: Water, Wastewater, Transport
-        
-        **Key Technologies:**
-        - Solar: PV, CSP, Distributed Solar
-        - Wind: Onshore, Offshore, Small Wind
-        - Gas: CCGT, OCGT, Cogeneration, LNG
-        - Nuclear: Nuclear Power, Atomic Energy
-        - Storage: Lithium-ion, Flow Batteries
-        - Hydro: Large, Small, Pumped Storage
-        """)
-    
-    with st.expander("📋 Services & Clients"):
-        st.markdown("""
-        **Services:**
-        - **DD**: Due Diligence (Technical, Commercial, Environmental)
-        - **FS**: Feasibility Study (Pre-feasibility, Bankability)
-        - **LE**: Lender's Engineer (Independent Engineer)
-        - **OE**: Owner's Engineer (Project Management)
-        - **TA**: Transaction Advisory (M&A, Investment)
-        - **Dev**: Project Development & Structuring
-        - **Policy**: Regulatory & Policy Analysis
-        
-        **Client Search Features:**
-        - Fuzzy matching for client names
-        - Handles abbreviations (WB → World Bank)
-        - Dynamic client list from database
-        - Case-insensitive search
-        """)
-    
-    st.divider()
-    
-    # Add comprehensive project statistics
-    if st.session_state['project_data']:
-        projects = st.session_state['project_data'].get('projects', [])
-        
-        st.subheader("📊 Database Statistics")
-        st.metric("Total Projects", len(projects))
-        
-        # Count by regions
-        region_counts = {}
-        for project in projects:
-            if project.get('regions'):
-                regions = project['regions'] if isinstance(project['regions'], list) else [project['regions']]
-                for region in regions:
-                    region_counts[region] = region_counts.get(region, 0) + 1
-        
-        if region_counts:
-            st.markdown("**Projects by Region:**")
-            sorted_regions = sorted(region_counts.items(), key=lambda x: x[1], reverse=True)
-            for region, count in sorted_regions:
-                st.markdown(f"• {region}: {count}")
-        
-        # Count by sectors
-        sector_counts = {}
-        for project in projects:
-            if project.get('sectors'):
-                sectors = project['sectors'] if isinstance(project['sectors'], list) else [project['sectors']]
-                for sector in sectors:
-                    sector_counts[sector] = sector_counts.get(sector, 0) + 1
-        
-        if sector_counts:
-            st.markdown("**Top Sectors:**")
-            sorted_sectors = sorted(sector_counts.items(), key=lambda x: x[1], reverse=True)[:5]
-            for sector, count in sorted_sectors:
-                st.markdown(f"• {sector}: {count}")
-        
-        # Count by countries (from the complete list)
-        country_counts = {}
-        for project in projects:
-            country = project.get('country', '')
-            if country:
-                # Map to known countries
-                for known_country in KNOWN_COUNTRIES.keys():
-                    if advanced_fuzzy_match(country, known_country):
-                        country_counts[known_country.title()] = country_counts.get(known_country.title(), 0) + 1
-                        break
-        
-        if country_counts:
-            st.markdown("**Top Countries:**")
-            sorted_countries = sorted(country_counts.items(), key=lambda x: x[1], reverse=True)[:8]
-            for country, count in sorted_countries:
-                st.markdown(f"• {country}: {count}")
+        # Add comprehensive project statistics
+        if st.session_state['project_data']:
+            projects = st.session_state['project_data'].get('projects', [])
+            
+            st.subheader("📊 Database Statistics")
+            st.metric("Total Projects", len(projects))
+            
+            # Count by regions
+            region_counts = {}
+            for project in projects:
+                if project.get('regions'):
+                    regions = project['regions'] if isinstance(project['regions'], list) else [project['regions']]
+                    for region in regions:
+                        region_counts[region] = region_counts.get(region, 0) + 1
+            
+            if region_counts:
+                st.markdown("**Projects by Region:**")
+                sorted_regions = sorted(region_counts.items(), key=lambda x: x[1], reverse=True)
+                for region, count in sorted_regions:
+                    st.markdown(f"• {region}: {count}")
+            
+            # Count by sectors
+            sector_counts = {}
+            for project in projects:
+                if project.get('sectors'):
+                    sectors = project['sectors'] if isinstance(project['sectors'], list) else [project['sectors']]
+                    for sector in sectors:
+                        sector_counts[sector] = sector_counts.get(sector, 0) + 1
+            
+            if sector_counts:
+                st.markdown("**Top Sectors:**")
+                sorted_sectors = sorted(sector_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+                for sector, count in sorted_sectors:
+                    st.markdown(f"• {sector}: {count}")
+            
+            # Count by countries (from the complete list)
+            country_counts = {}
+            for project in projects:
+                country = project.get('country', '')
+                if country:
+                    # Map to known countries
+                    for known_country in KNOWN_COUNTRIES.keys():
+                        if advanced_fuzzy_match(country, known_country):
+                            country_counts[known_country.title()] = country_counts.get(known_country.title(), 0) + 1
+                            break
+            
+            if country_counts:
+                st.markdown("**Top Countries:**")
+                sorted_countries = sorted(country_counts.items(), key=lambda x: x[1], reverse=True)[:8]
+                for country, count in sorted_countries:
+                    st.markdown(f"• {country}: {count}")
 
 # Add input box at the top for General and Search modes
 if st.session_state['mode'] in ['general', 'search']:

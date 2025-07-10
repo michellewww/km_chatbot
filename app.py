@@ -621,102 +621,123 @@ Only include a theme if it is supported by BOTH the job description and the CV.
         else:
             st.info("No directly relevant projects identified.")
         
-        # Download button
-        from docx import Document
-        from docx.shared import Pt
-        from docx.oxml.ns import qn
-        from docx.oxml import OxmlElement
-        from io import BytesIO
-        doc = Document()
-        # Set default font for the document to Century Gothic
-        style = doc.styles['Normal']
-        font = style.font
-        font.name = 'Century Gothic'
-        font.size = Pt(10)
-        # For compatibility with some Word versions
-        style.element.rPr.rFonts.set(qn('w:eastAsia'), 'Century Gothic')
-
-        # add body text "Key Qualifications"
-        doc.add_paragraph('Key Qualifications')
-        qualifications = st.session_state.get('cv_qualifications', '')
-
-        # --- FIX: Output each table immediately after its associated paragraphs ---
-        import re
-        qualifications = st.session_state.get('cv_qualifications', '')
-        # Split on the theme markers
-        split_sections = re.split(r'===Relevant Project Experience for Theme 2===|===Relevant Project Experience for Theme 3===', qualifications)
-        # There can be up to 3 sections: [before Theme 2, between Theme 2 and 3, after Theme 3]
-        def extract_projects_and_text(section_text):
-            if not section_text:
-                return [], []
-            # Find all project blocks
-            projects = re.findall(r'>>>PROJECT_START<<<(.*?)>>>PROJECT_END<<<', section_text, re.DOTALL)
-            # Remove all project blocks from the section
-            cleaned = re.sub(r'>>>PROJECT_START<<<.*?>>>PROJECT_END<<<', '', section_text, flags=re.DOTALL)
-            # Any non-empty lines left are paragraphs
-            paras = [p.strip() for p in cleaned.split('\n') if p.strip()]
-            return projects, paras
-        # Helper to set cell background color
-        def set_cell_background(cell, color_hex):
-            from docx.oxml import parse_xml
-            from docx.oxml.ns import nsdecls
-            cell._tc.get_or_add_tcPr().append(
-                parse_xml(r'<w:shd {} w:fill="{}"/>'.format(nsdecls('w'), color_hex))
-            )
-        DARK_BLUE = '002060'      # Dark blue, accent 1
-        LIGHT_BLUE = 'C6D9F1'     # Blue, accent 1, lighter 80%
-        WHITE = 'FFFFFF'
-        # --- NEW: Add 4 paragraphs at the top ---
-        qualifications = st.session_state.get('cv_qualifications', '')
-        # Extract paragraphs (split on double newlines, keep only non-empty)
-        paragraphs = [p.strip() for p in re.split(r'\n{2,}', qualifications) if p.strip()]
-        # Only keep the first 4 paragraphs (should be exactly 4 if prompt is followed)
-        for para in paragraphs[:4]:
-            p = doc.add_paragraph(para)
-            for run in p.runs:
-                run.font.name = 'Century Gothic'
-                run.font.size = Pt(10)
-            p.style = doc.styles['Normal']
-        # --- NEW: Add a single table with all relevant projects ---
-        relevant_projects = st.session_state.get('cv_relevant_projects', [])
-        if relevant_projects:
-            table = doc.add_table(rows=len(relevant_projects)+1, cols=1)
-            table.style = 'Table Grid'
-            # First row: empty, dark blue
-            cell = table.cell(0, 0)
-            cell.text = ''
-            set_cell_background(cell, DARK_BLUE)
-            # Project rows: alternate white and light blue, starting from first project row
-            for i, proj in enumerate(relevant_projects):
-                cell = table.cell(i+1, 0)
-                cell.text = ''  # Clear cell
-                if ":" in proj:
-                    before, after = proj.split(":", 1)
-                    run = cell.paragraphs[0].add_run(before + ":")
-                    run.bold = True
+        # --- NEW: Duplicate and edit the uploaded CV file ---
+        if uploaded_file and uploaded_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+            from docx import Document
+            from docx.shared import Pt
+            from docx.oxml.ns import qn
+            from io import BytesIO
+            import re
+            
+            # Helper: Find paragraph index by heading text (case-insensitive, partial match)
+            def find_paragraph_index(doc, heading_text):
+                for i, para in enumerate(doc.paragraphs):
+                    if heading_text.lower() in para.text.lower():
+                        return i
+                return -1
+            
+            # Helper: Remove paragraphs in a range (inclusive)
+            def remove_paragraphs(doc, start_idx, end_idx):
+                for i in range(end_idx, start_idx - 1, -1):
+                    p = doc.paragraphs[i]._element
+                    p.getparent().remove(p)
+                    p._p = p._element = None
+            
+            # Helper: Find the first table/block after a given paragraph index
+            def find_next_block_after_paragraph(doc, para_idx):
+                para_elem = doc.paragraphs[para_idx]._element
+                body = para_elem.getparent()
+                found = False
+                for idx, child in enumerate(body):
+                    if found:
+                        return idx, child
+                    if child == para_elem:
+                        found = True
+                return None, None
+            
+            # Helper: Remove a table by its xml element
+            def remove_table_by_element(doc, tbl_elem):
+                tbl_elem.getparent().remove(tbl_elem)
+            
+            # Helper: Insert paragraphs at a given index in the document body
+            def insert_paragraphs_at_body(doc, ref_para_idx, paragraphs, style=None):
+                from docx.oxml import OxmlElement
+                from docx.text.paragraph import Paragraph
+                ref_para_elem = doc.paragraphs[ref_para_idx]._element
+                body = ref_para_elem.getparent()
+                insert_idx = body.index(ref_para_elem) + 1
+                for para_text in paragraphs:
+                    new_p = OxmlElement('w:p')
+                    body.insert(insert_idx, new_p)
+                    para = Paragraph(new_p, doc)
+                    run = para.add_run(para_text)
                     run.font.name = 'Century Gothic'
                     run.font.size = Pt(10)
-                    run2 = cell.paragraphs[0].add_run(after)
-                    run2.font.name = 'Century Gothic'
-                    run2.font.size = Pt(10)
+                    if style:
+                        para.style = style
+                    insert_idx += 1
+            
+            # Helper: Insert a table at a given body index
+            def insert_table_at_body(doc, body, insert_idx, rows, cols, data):
+                tbl = doc.add_table(rows=rows, cols=cols)
+                tbl_elem = tbl._element
+                body.insert(insert_idx, tbl_elem)
+                for r, row_data in enumerate(data):
+                    for c, cell_text in enumerate(row_data):
+                        cell = tbl.cell(r, c)
+                        cell.text = cell_text
+                        for p in cell.paragraphs:
+                            for run in p.runs:
+                                run.font.name = 'Century Gothic'
+                                run.font.size = Pt(10)
+                return tbl
+            
+            # Load the uploaded file as a docx.Document
+            uploaded_file.seek(0)
+            doc = Document(uploaded_file)
+            
+            # --- Replace Key Qualification section ---
+            qual_heading_idx = find_paragraph_index(doc, "Key Qualification")
+            education_heading_idx = find_paragraph_index(doc, "Education")
+            if qual_heading_idx != -1 and education_heading_idx != -1 and education_heading_idx > qual_heading_idx:
+                # Remove all paragraphs between qual_heading_idx+1 and education_heading_idx-1
+                remove_paragraphs(doc, qual_heading_idx+1, education_heading_idx-1)
+                # Insert new qualification paragraphs at the position after qual_heading_idx
+                qualifications = st.session_state.get('cv_qualifications', '')
+                paragraphs = [p.strip() for p in re.split(r'\n{2,}', qualifications) if p.strip()]
+                insert_paragraphs_at_body(doc, qual_heading_idx, paragraphs)
+            
+            # --- Replace Relevant Projects Table ---
+            work_heading_idx = find_paragraph_index(doc, "Work Undertaken that Best Illustrate Capability to Handle the Tasks Assigned")
+            if work_heading_idx != -1:
+                # Find the next block after the heading (should be the table)
+                body = doc.paragraphs[work_heading_idx]._element.getparent()
+                next_block_idx, next_block = find_next_block_after_paragraph(doc, work_heading_idx)
+                # If it's a table, remove it
+                if next_block is not None and next_block.tag.endswith('tbl'):
+                    remove_table_by_element(doc, next_block)
+                    insert_idx = next_block_idx  # Insert at the same place
                 else:
-                    run = cell.paragraphs[0].add_run(proj.strip())
-                    run.font.name = 'Century Gothic'
-                    run.font.size = Pt(10)
-                color = WHITE if i % 2 == 0 else LIGHT_BLUE
-                set_cell_background(cell, color)
-            doc.add_paragraph('')  # Add space after table
-
-        buffer = BytesIO()
-        doc.save(buffer)
-        buffer.seek(0)
-        st.download_button(
-            label="Download as Word Document",
-            data=buffer,
-            file_name="KM_CV_Qualifications.docx",
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        )
-
+                    # If not a table, insert after the heading
+                    insert_idx = body.index(doc.paragraphs[work_heading_idx]._element) + 1
+                # Prepare data for new table
+                relevant_projects = st.session_state.get('cv_relevant_projects', [])
+                if relevant_projects:
+                    data = [[proj] for proj in relevant_projects]
+                    insert_table_at_body(doc, body, insert_idx, len(data), 1, data)
+            
+            # Save to buffer
+            buffer = BytesIO()
+            doc.save(buffer)
+            buffer.seek(0)
+            st.download_button(
+                label="Download as Word Document",
+                data=buffer,
+                file_name="KM_CV_Qualifications.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            )
+        else:
+            st.info("Download is only supported for DOCX uploads.")
     elif uploaded_file:
         st.info("👆 Please describe the work requirements to analyze the CV")
     elif work_description:

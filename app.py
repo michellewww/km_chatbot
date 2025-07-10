@@ -396,7 +396,7 @@ if st.session_state['mode'] == 'cv':
     # NEW: Prompt revision textbox
     default_qual_prompt = """You are an expert proposal writer. I will provide you with:
 1. Bio section from a CV
-2. Relevant project experience 
+2. Relevant project experience
 3. Job/work description
 4. Themes of the proposal
 
@@ -416,11 +416,11 @@ Themes of the proposal:
 
 The four paragraphs should be structured as follows:
 1. Paragraph 1 should introduce the individual, summarizing their current role, core areas of expertise, experience with relevant power generation technologies (e.g., LNG, renewables, storage), and countries or regions where they have worked that are relevant to the proposal.
-2. Paragraph 2 should focus on a specific theme that aligns with the needs of the proposal. After paragraph 2, insert a section titled ===Relevant Project Experience for Theme 2=== and then output a table as follows: For each of exactly 2-3 relevant project experiences (copied verbatim from the RELEVANT PROJECT EXPERIENCE section above) that reinforce the theme stated in paragraph 2, output a line starting with >>>PROJECT_START<<< and ending with >>>PROJECT_END<<<, with the project description in between. Each project should be clearly separated and include the exact position, project name, location, year, and a short description as in the CV.
-3. Paragraph 3 should focus on another specific theme. After paragraph 3, insert a section titled ===Relevant Project Experience for Theme 3=== and then output a table as follows: For each of exactly 2-3 relevant project experiences (copied verbatim from the RELEVANT PROJECT EXPERIENCE section above) that reinforce the theme stated in paragraph 3, output a line starting with >>>PROJECT_START<<< and ending with >>>PROJECT_END<<<, with the project description in between. Each project should be clearly separated and include the exact position, project name, location, year, and a short description as in the CV (if the tense in the project description is not past tense, change it to past tense, but keep the exact project description as in the CV).
+2. Paragraph 2 should focus on a specific theme that aligns with the needs of the proposal.
+3. Paragraph 3 should focus on another specific theme.
 4. Paragraph 4 should conclude the bio by summarizing how the individual's experience aligns with the proposed assignment. It should also include a brief statement of their academic background, including degrees earned, fields of study, and the institutions attended. Ensure the writing is cohesive, clear, and appropriate for inclusion in a technical or commercial proposal.
 
-Write in third person (he/she) and make it compelling but factual.
+Write in third person (he/she) and make it compelling but factual. Do NOT include any project tables, project markers, or special formatting. Only output the four paragraphs as plain text, each separated by a blank line.
 """
     qual_prompt = st.text_area(
         "Revise the Answer Structuring Prompt (Optional)",
@@ -642,96 +642,46 @@ Write in third person (he/she) and make it compelling but factual.
         DARK_BLUE = '002060'      # Dark blue, accent 1
         LIGHT_BLUE = 'C6D9F1'     # Blue, accent 1, lighter 80%
         WHITE = 'FFFFFF'
-        # Section 0: before Theme 2 (paragraphs 1 and 2)
-        if len(split_sections) > 0:
-            for para in [p.strip() for p in split_sections[0].split('\n') if p.strip()]:
-                p = doc.add_paragraph(para)
-                for run in p.runs:
+        # --- NEW: Add 4 paragraphs at the top ---
+        qualifications = st.session_state.get('cv_qualifications', '')
+        # Extract paragraphs (split on double newlines, keep only non-empty)
+        paragraphs = [p.strip() for p in re.split(r'\n{2,}', qualifications) if p.strip()]
+        # Only keep the first 4 paragraphs (should be exactly 4 if prompt is followed)
+        for para in paragraphs[:4]:
+            p = doc.add_paragraph(para)
+            for run in p.runs:
+                run.font.name = 'Century Gothic'
+                run.font.size = Pt(10)
+            p.style = doc.styles['Normal']
+        # --- NEW: Add a single table with all relevant projects ---
+        relevant_projects = st.session_state.get('cv_relevant_projects', [])
+        if relevant_projects:
+            table = doc.add_table(rows=len(relevant_projects)+1, cols=1)
+            table.style = 'Table Grid'
+            # First row: empty, dark blue
+            cell = table.cell(0, 0)
+            cell.text = ''
+            set_cell_background(cell, DARK_BLUE)
+            # Project rows: alternate white and light blue, starting from first project row
+            for i, proj in enumerate(relevant_projects):
+                cell = table.cell(i+1, 0)
+                cell.text = ''  # Clear cell
+                if ":" in proj:
+                    before, after = proj.split(":", 1)
+                    run = cell.paragraphs[0].add_run(before + ":")
+                    run.bold = True
                     run.font.name = 'Century Gothic'
                     run.font.size = Pt(10)
-                p.style = doc.styles['Normal']
-        # Section 1: Theme 2 table and any text before Theme 3 (projects for theme 2, possible paragraph 3)
-        if len(split_sections) > 1:
-            theme2_projects, theme2_paras = extract_projects_and_text(split_sections[1])
-            if theme2_projects:
-                table = doc.add_table(rows=len(theme2_projects)+1, cols=1)
-                table.style = 'Table Grid'
-                # First row: empty, dark blue
-                cell = table.cell(0, 0)
-                cell.text = ''
-                set_cell_background(cell, DARK_BLUE)
-                # Project rows: alternate white and light blue, starting from second project row (i=1)
-                for i, proj in enumerate(theme2_projects):
-                    cell = table.cell(i+1, 0)
-                    cell.text = ''  # Clear cell
-                    if ":" in proj:
-                        before, after = proj.split(":", 1)
-                        run = cell.paragraphs[0].add_run(before + ":")
-                        run.bold = True
-                        run.font.name = 'Century Gothic'
-                        run.font.size = Pt(10)
-                        run2 = cell.paragraphs[0].add_run(after)
-                        run2.font.name = 'Century Gothic'
-                        run2.font.size = Pt(10)
-                    else:
-                        run = cell.paragraphs[0].add_run(proj.strip())
-                        run.font.name = 'Century Gothic'
-                        run.font.size = Pt(10)
-                    if i == 0:
-                        color = WHITE
-                    elif i % 2 == 1:
-                        color = LIGHT_BLUE
-                    else:
-                        color = WHITE
-                    set_cell_background(cell, color)
-                doc.add_paragraph('')  # Add space after table
-            for para in theme2_paras:
-                p = doc.add_paragraph(para)
-                for run in p.runs:
+                    run2 = cell.paragraphs[0].add_run(after)
+                    run2.font.name = 'Century Gothic'
+                    run2.font.size = Pt(10)
+                else:
+                    run = cell.paragraphs[0].add_run(proj.strip())
                     run.font.name = 'Century Gothic'
                     run.font.size = Pt(10)
-                p.style = doc.styles['Normal']
-        # Section 2: Theme 3 table and any text after (projects for theme 3, possible paragraph 4)
-        if len(split_sections) > 2:
-            theme3_projects, theme3_paras = extract_projects_and_text(split_sections[2])
-            if theme3_projects:
-                table = doc.add_table(rows=len(theme3_projects)+1, cols=1)
-                table.style = 'Table Grid'
-                # First row: empty, dark blue
-                cell = table.cell(0, 0)
-                cell.text = ''
-                set_cell_background(cell, DARK_BLUE)
-                # Project rows: alternate white and light blue, starting from second project row (i=1)
-                for i, proj in enumerate(theme3_projects):
-                    cell = table.cell(i+1, 0)
-                    cell.text = ''  # Clear cell
-                    if ":" in proj:
-                        before, after = proj.split(":", 1)
-                        run = cell.paragraphs[0].add_run(before + ":")
-                        run.bold = True
-                        run.font.name = 'Century Gothic'
-                        run.font.size = Pt(10)
-                        run2 = cell.paragraphs[0].add_run(after)
-                        run2.font.name = 'Century Gothic'
-                        run2.font.size = Pt(10)
-                    else:
-                        run = cell.paragraphs[0].add_run(proj.strip())
-                        run.font.name = 'Century Gothic'
-                        run.font.size = Pt(10)
-                    if i == 0:
-                        color = WHITE
-                    elif i % 2 == 1:
-                        color = LIGHT_BLUE
-                    else:
-                        color = WHITE
-                    set_cell_background(cell, color)
-                doc.add_paragraph('')  # Add space after table
-            for para in theme3_paras:
-                p = doc.add_paragraph(para)
-                for run in p.runs:
-                    run.font.name = 'Century Gothic'
-                    run.font.size = Pt(10)
-                p.style = doc.styles['Normal']
+                color = WHITE if i % 2 == 0 else LIGHT_BLUE
+                set_cell_background(cell, color)
+            doc.add_paragraph('')  # Add space after table
 
         buffer = BytesIO()
         doc.save(buffer)

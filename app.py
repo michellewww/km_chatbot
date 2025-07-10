@@ -416,8 +416,8 @@ Themes of the proposal:
 
 The four paragraphs should be structured as follows:
 1. Paragraph 1 should introduce the individual, summarizing their current role, core areas of expertise, experience with relevant power generation technologies (e.g., LNG, renewables, storage), and countries or regions where they have worked that are relevant to the proposal.
-2. Paragraph 2 should focus on a specific theme that aligns with the needs of the proposal.
-3. Paragraph 3 should focus on another specific theme.
+2. Paragraph 2 should focus on a specific theme that aligns with the needs of the proposal. It must begin with a topic sentence stating the theme, followed by summarizing the highlighting two to three specific project examples from the CV that illustrate the individual's experience in that area.
+3. Paragraph 3 should focus on another specific theme. It must also begin with a topic sentence stating the theme, followed by summarizing the highlighting two to three specific project examples from the CV that illustrate the individual's experience in that area.
 4. Paragraph 4 should conclude the bio by summarizing how the individual's experience aligns with the proposed assignment. It should also include a brief statement of their academic background, including degrees earned, fields of study, and the institutions attended. Ensure the writing is cohesive, clear, and appropriate for inclusion in a technical or commercial proposal.
 
 Write in third person (he/she) and make it compelling but factual. Do NOT include any project tables, project markers, or special formatting. Only output the four paragraphs as plain text, each separated by a blank line.
@@ -477,12 +477,36 @@ Write in third person (he/she) and make it compelling but factual. Do NOT includ
                     st.error("OpenAI client not initialized. Please check your API key.")
                     return []
                 try:
+                    # Use both work_description and the CV text (bio_text + projects_text)
+                    bio_text, projects_text = separate_cv_sections(cv_text) if 'cv_text' in locals() else ("", "")
                     prompt = f"""
-                    You are an expert CV analyst. I will provide you with a job/work description.\n\nYour task is to identify the main themes, skills, sectors, technologies, and types of experience that would be most relevant for this position.\n\nJOB/WORK DESCRIPTION:\n{work_description}\n\nPlease return a concise comma-separated list of themes (e.g., 'solar power, feasibility studies, project management, Africa, financial modeling, regulatory analysis').\nFocus on specific technical skills, sectors, technologies, and experience types that would be valuable for this role.\nDo not include generic words like 'project' or 'experience'.\n"""
+You are an expert CV analyst. I will provide you with a job/work description and a candidate's CV (bio and project experience).
+
+Your task is to identify the main themes, skills, sectors, technologies, and types of experience that are most relevant for this position, but ONLY include themes that are clearly relevant to BOTH the job/work description AND the candidate's actual experience as found in the CV.
+
+Be as comprehensive as possible: include any theme that is reasonably supported by both the job description and the candidate's CV, even if the evidence is not overwhelming. If in doubt, include the theme as long as there is some support in both sources.
+
+When extracting themes, ensure you consider and include (if relevant):
+– Countries or regions with relevant work experience
+– Types of assignments (e.g., due diligence, feasibility studies, PPP structuring, financial analysis)
+– Technologies (e.g., gas-fired power, offshore wind, battery storage)
+– Power market experience (e.g., small island systems, emerging markets, regulated vs. liberalized markets)
+– Cross-cutting skills (e.g., stakeholder engagement, regulatory support, economic modeling)
+
+JOB/WORK DESCRIPTION:
+{work_description}
+
+CANDIDATE CV (BIO + PROJECTS):
+{bio_text}\n{projects_text}
+
+Please return a concise comma-separated list of themes (e.g., 'solar power, feasibility studies, project management, Africa, financial modeling, regulatory analysis').
+Focus on specific technical skills, sectors, technologies, and experience types that are valuable for this role AND are supported by the candidate's CV. Do not include generic words like 'project' or 'experience'.
+Only include a theme if it is supported by BOTH the job description and the CV.
+"""
                     response = openai_client.chat.completions.create(
                         model="gpt-4.1-mini",
                         messages=[
-                            {"role": "system", "content": "You are an expert CV analyst specializing in extracting key themes from job requirements."},
+                            {"role": "system", "content": "You are an expert CV analyst specializing in extracting key themes from job requirements and candidate CVs."},
                             {"role": "user", "content": prompt}
                         ],
                         temperature=0.1,

@@ -445,6 +445,43 @@ Write in third person (he/she) and make it compelling but factual. Do NOT includ
         help="AI will suggest themes to highlight from the project experience. You can edit these before generating the final answer."
     )
 
+    # --- NEW: Manual Theme Inputs ---
+    st.markdown("**Enter Three Themes to Use in the CV (these will be used for generation):**")
+    theme1 = st.text_input("Theme 1", key="manual_theme_1")
+    theme2 = st.text_input("Theme 2", key="manual_theme_2")
+    theme3 = st.text_input("Theme 3", key="manual_theme_3")
+
+    # --- Remove editable prompt box, use fixed prompt below ---
+    five_paragraph_prompt = '''You are an expert proposal writer. I will provide you with:
+1. Bio section from a CV
+2. Comprehensive project experience
+3. Job/work description
+4. Themes of the proposal
+
+Your task is to write a five-paragraph professional bio for this individual. Use confident, professional language without exaggeration or flattery.
+
+BIO SECTION:
+{{bio_text}}
+
+RELEVANT PROJECT EXPERIENCE:
+{{relevant_projects}}
+
+JOB/WORK DESCRIPTION:
+{{user_description}}
+
+Themes of the proposal:
+{{themes}}
+
+The five paragraphs should be structured as follows:
+
+1. Paragraph 1 should briefly  introduce the individual, summarizing their experience in the relevant themes to the proposal (e.g., relevant power generation technologies, countries or regions where they have worked that are relevant to the proposal).
+2. Paragraph 2 should focus on a specific theme (identified below) that aligns with the needs of the proposal. It should start with a topic sentence presenting the theme, followed by a short description of 2 - 3 of the most relevant projects supporting that theme.
+3. Paragraph 3 should focus on a specific theme (identified below) that aligns with the needs of the proposal. It should start with a topic sentence presenting the theme, followed by a short description of 2 - 3 of the most relevant projects supporting that theme.
+4. Paragraph 4 should focus on a specific theme (identified below) that aligns with the needs of the proposal. It should start with a topic sentence presenting the theme, followed by a short description of 2 - 3 of the most relevant projects supporting that theme.
+5. Paragraph 5 is a 2 - 3 sentence statement of their academic background, including degrees earned, fields of study, and the institutions attended.
+
+Ensure the writing is cohesive, clear, and appropriate for inclusion in a technical or commercial proposal. Write in third person (he/she) and make it compelling but factual.'''
+
     # NEW: Generate CV button (will be enabled after themes are available)
     generate_cv_btn = st.button("Generate CV", type="primary", use_container_width=True, key="generate_cv_btn")
 
@@ -532,14 +569,9 @@ Only include a theme if it is supported by BOTH the job description and the CV.
         # This section is now handled by the Extract Themes and Generate CV buttons
         pass
 
-    # --- NEW: Generate CV button logic ---
-    if generate_cv_btn and uploaded_file and work_description and st.session_state.get('extracted_themes') and st.session_state['extracted_themes'] != "(Click 'Extract Themes' above to get themes from your requirements)":
-        # Use the user-edited themes
-        user_themes = st.session_state.get('extracted_themes')
-        # Use the user-edited prompt
-        user_prompt = qual_prompt
-        # Use the previously extracted bio_text, individual_projects, etc.
-        # For now, re-extract (could be optimized with session state)
+    # --- UPDATED: Generate CV button logic to use manual themes and fixed prompt ---
+    if generate_cv_btn and uploaded_file and work_description and theme1 and theme2 and theme3:
+        user_themes = ', '.join([theme1, theme2, theme3])
         file_content = uploaded_file.read()
         if uploaded_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
             cv_text = extract_text_from_docx(file_content)
@@ -554,11 +586,54 @@ Only include a theme if it is supported by BOTH the job description and the CV.
         bio_text, projects_text = separate_cv_sections(cv_text)
         individual_projects = parse_projects_section(projects_text)
         relevant_projects = find_relevant_projects_with_gpt(projects_text, work_description, use_gpt_processing)
-        # Insert the user themes into the prompt if needed
-        # For now, just append to the prompt
-        final_prompt = user_prompt + f"\n\nHIGHLIGHT THESE THEMES: {user_themes}"
-        # Use the custom prompt in GPT call
-        def generate_qualification_paragraphs_custom_prompt(bio_text, relevant_projects, user_description, custom_prompt, user_themes, use_gpt=True):
+
+        # --- Deduplicate by project title ---
+        def get_project_title(proj):
+            # Use text before first colon or first line as title
+            if ':' in proj:
+                return proj.split(':')[0].strip()
+            else:
+                return proj.split('\n')[0].strip()
+        unique_projects = {}
+        for proj in relevant_projects:
+            title = get_project_title(proj)
+            if title not in unique_projects:
+                unique_projects[title] = proj
+        deduped_projects = list(unique_projects.values())
+
+        # --- Tailor each project using GPT ---
+        def tailor_project_with_gpt(original_project, job_description):
+            tailor_prompt = f"""
+You are an expert proposal writer. Here is a project description from a CV and a job/work description. 
+Your task is to tailor the project description to the job/work description, keeping as much of the original text and detail as possible, 
+but making it directly relevant to the job/work description. The tailored description should be between 150 and 200 words. 
+Do NOT invent facts, but you may rephrase, reorganize, or clarify as needed for clarity and relevance.
+
+JOB/WORK DESCRIPTION:
+{job_description}
+
+ORIGINAL PROJECT DESCRIPTION:
+{original_project}
+
+Return only the tailored project description, no commentary or extra text.
+"""
+            try:
+                response = openai_client.chat.completions.create(
+                    model="gpt-4.1-mini",
+                    messages=[
+                        {"role": "system", "content": "You are an expert proposal writer specializing in tailoring project descriptions for CVs."},
+                        {"role": "user", "content": tailor_prompt}
+                    ],
+                    temperature=0.2,
+                    max_tokens=400
+                )
+                return response.choices[0].message.content.strip()
+            except Exception as e:
+                return f"[Error tailoring project: {str(e)}]"
+
+        tailored_projects = [tailor_project_with_gpt(proj, work_description) for proj in deduped_projects]
+
+        def generate_qualification_paragraphs_manual_themes(bio_text, relevant_projects, user_description, user_themes, use_gpt=True):
             if not use_gpt:
                 return "Qualification generation disabled. Please enable GPT processing to generate tailored qualification paragraphs."
             if not openai_client:
@@ -566,22 +641,12 @@ Only include a theme if it is supported by BOTH the job description and the CV.
             try:
                 projects_combined = "\n\n".join(relevant_projects) if relevant_projects else "No directly relevant projects identified."
                 prompt = (
-                    custom_prompt
+                    five_paragraph_prompt
                     .replace("{{bio_text}}", bio_text)
                     .replace("{{relevant_projects}}", projects_combined)
                     .replace("{{user_description}}", user_description)
                     .replace("{{themes}}", user_themes)
                 )
-                # DEBUG: Show what is being sent to the LLM
-                # debug_info = {
-                #     "bio_text": bio_text,
-                #     "relevant_projects": relevant_projects,
-                #     "user_description": user_description,
-                #     "user_themes": user_themes,
-                #     "prompt": prompt
-                # }
-                # st.write("DEBUG LLM INPUT", debug_info)
-                # st.session_state['cv_debug_llm_input'] = debug_info
                 response = openai_client.chat.completions.create(
                     model="gpt-4.1-mini",
                     messages=[
@@ -594,13 +659,10 @@ Only include a theme if it is supported by BOTH the job description and the CV.
                 return response.choices[0].message.content.strip()
             except Exception as e:
                 return f"Unable to generate qualifications due to API error: {str(e)}"
-        qualifications = generate_qualification_paragraphs_custom_prompt(bio_text, relevant_projects, work_description, final_prompt, user_themes, use_gpt_processing)
-        
-        # Store results in session state to persist across reruns
+        qualifications = generate_qualification_paragraphs_manual_themes(bio_text, tailored_projects, work_description, user_themes, use_gpt_processing)
         st.session_state['cv_qualifications'] = qualifications
-        st.session_state['cv_relevant_projects'] = relevant_projects
+        st.session_state['cv_relevant_projects'] = tailored_projects
         st.session_state['cv_generated'] = True
-        
         st.success("✅ AI Analysis Complete!")
         st.rerun()
 
@@ -679,18 +741,54 @@ Only include a theme if it is supported by BOTH the job description and the CV.
             
             # Helper: Insert a table at a given body index
             def insert_table_at_body(doc, body, insert_idx, rows, cols, data):
-                tbl = doc.add_table(rows=rows, cols=cols)
-                tbl_elem = tbl._element
+                from docx.oxml import OxmlElement
+                from docx.oxml.ns import qn
+                
+                # Create table element
+                tbl_elem = OxmlElement('w:tbl')
+                
+                # Insert at the specified position
                 body.insert(insert_idx, tbl_elem)
-                for r, row_data in enumerate(data):
-                    for c, cell_text in enumerate(row_data):
-                        cell = tbl.cell(r, c)
-                        cell.text = cell_text
-                        for p in cell.paragraphs:
-                            for run in p.runs:
+                
+                # Create a Table object from the element
+                from docx.table import Table
+                tbl = Table(tbl_elem, doc)
+                
+                # Add rows and cells
+                for r in range(rows):
+                    row_elem = OxmlElement('w:tr')
+                    tbl_elem.append(row_elem)
+                    
+                    for c in range(cols):
+                        cell_elem = OxmlElement('w:tc')
+                        row_elem.append(cell_elem)
+                        
+                        # Add paragraph to cell
+                        p_elem = OxmlElement('w:p')
+                        cell_elem.append(p_elem)
+                        
+                        # Add text if data is provided
+                        if r < len(data) and c < len(data[r]):
+                            r_elem = OxmlElement('w:r')
+                            p_elem.append(r_elem)
+                            t_elem = OxmlElement('w:t')
+                            t_elem.text = str(data[r][c])
+                            r_elem.append(t_elem)
+                
+                # Refresh the table structure
+                tbl._tbl = tbl_elem
+                
+                # Apply basic formatting to all cells
+                for row in tbl.rows:
+                    for cell in row.cells:
+                        for paragraph in cell.paragraphs:
+                            for run in paragraph.runs:
                                 run.font.name = 'Century Gothic'
                                 run.font.size = Pt(10)
+                
                 return tbl
+
+
             
             # Load the uploaded file as a docx.Document
             uploaded_file.seek(0)
@@ -708,24 +806,70 @@ Only include a theme if it is supported by BOTH the job description and the CV.
                 insert_paragraphs_at_body(doc, qual_heading_idx, paragraphs)
             
             # --- Replace Relevant Projects Table ---
-            work_heading_idx = find_paragraph_index(doc, "Work Undertaken that Best Illustrate Capability to Handle the Tasks Assigned")
+            work_heading_idx = find_paragraph_index(doc, "Work Undertaken that Best Illustrate")
             if work_heading_idx != -1:
-                # Find the next block after the heading (should be the table)
-                body = doc.paragraphs[work_heading_idx]._element.getparent()
-                next_block_idx, next_block = find_next_block_after_paragraph(doc, work_heading_idx)
-                # If it's a table, remove it
-                if next_block is not None and next_block.tag.endswith('tbl'):
-                    remove_table_by_element(doc, next_block)
-                    insert_idx = next_block_idx  # Insert at the same place
-                else:
-                    # If not a table, insert after the heading
-                    insert_idx = body.index(doc.paragraphs[work_heading_idx]._element) + 1
-                # Prepare data for new table
+                # Remove everything AFTER the heading (preserve everything before)
+                paragraphs_to_remove = []
+                for i in range(work_heading_idx + 1, len(doc.paragraphs)):
+                    paragraphs_to_remove.append(doc.paragraphs[i])
+                
+                for para in paragraphs_to_remove:
+                    p = para._element
+                    p.getparent().remove(p)
+                
+                # Remove all tables
+                tables_to_remove = list(doc.tables)
+                for table in tables_to_remove:
+                    tbl = table._element
+                    tbl.getparent().remove(tbl)
+                
+                # Add new content
                 relevant_projects = st.session_state.get('cv_relevant_projects', [])
+                
                 if relevant_projects:
-                    data = [[proj] for proj in relevant_projects]
-                    insert_table_at_body(doc, body, insert_idx, len(data), 1, data)
-            
+                    # Create table
+                    new_table = doc.add_table(rows=len(relevant_projects), cols=1)
+                    new_table.style = 'Table Grid'
+                    
+                    # Set table width (this is the correct way)
+                    try:
+                        new_table.width = Inches(6.5)
+                    except:
+                        pass  # Skip if width setting fails
+                    
+                    # Populate the table
+                    for i, project in enumerate(relevant_projects):
+                        cell = new_table.cell(i, 0)
+                        cell.text = project.strip()
+                        
+                        # Format the cell content
+                        for paragraph in cell.paragraphs:
+                            for run in paragraph.runs:
+                                run.font.name = 'Century Gothic'
+                                run.font.size = Pt(10)
+                        
+                        # Try to set cell width - wrap in try/except to avoid errors
+                        try:
+                            # Set cell width using the proper method
+                            from docx.shared import Inches
+                            cell.width = Inches(6.5)
+                        except:
+                            # If that doesn't work, try this alternative method
+                            try:
+                                cell._tc.tcPr.tcW.w = 6240  # Width in twentieths of a point (6.5 inches)
+                            except:
+                                pass  # Skip width setting if it fails
+                
+                else:
+                    # Add simple paragraph for no projects
+                    no_projects_para = doc.add_paragraph("No directly relevant projects identified from the analysis.")
+                    for run in no_projects_para.runs:
+                        run.font.name = 'Century Gothic'
+                        run.font.size = Pt(10)
+
+
+
+            # Try to set paragraph width - wrap in try/except to avoid errors            
             # Save to buffer
             buffer = BytesIO()
             doc.save(buffer)

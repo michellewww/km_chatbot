@@ -23,11 +23,11 @@ from openai import OpenAI
 from dotenv import load_dotenv
 import shutil
 from improved_docx_generation import generate_improved_word_document
-# import pysqlite3
+import pysqlite3
 
-# __import__('pysqlite3')
-# import sys
-# sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+__import__('pysqlite3')
+import sys
+sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 
 # Add this at the top of your script, before other imports
 load_dotenv()

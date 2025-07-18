@@ -29,7 +29,7 @@ __import__('pysqlite3')
 import sys
 sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 
-# Add this at the top of your script, before other imports
+# # Add this at the top of your script, before other imports
 load_dotenv()
 
 # Download required NLTK data
@@ -838,7 +838,7 @@ Only include a theme if it is supported by BOTH the job description and the CV.
                 title = get_project_title(proj)[:100] + "..." if len(get_project_title(proj)) > 100 else get_project_title(proj)
                 st.write(f"  {i+1}. {title}")
 
-        # --- Tailor each project using GPT ---
+        # --- Tailor each project using GPT, one at a time (or in small batches if needed) ---
         def tailor_project_with_gpt(original_project, job_description):
             tailor_prompt = f"""
 You are an expert proposal writer. Here is a project description from a CV and a job/work description. 
@@ -862,13 +862,22 @@ Return only the tailored project description, no commentary or extra text.
                         {"role": "user", "content": tailor_prompt}
                     ],
                     temperature=0.2,
-                    max_tokens=1200  # Increased from 400 to handle longer project descriptions
+                    max_tokens=1200
                 )
                 return response.choices[0].message.content.strip()
             except Exception as e:
                 return f"[Error tailoring project: {str(e)}]"
 
-        tailored_projects = [tailor_project_with_gpt(proj, work_description) for proj in deduped_projects]
+        # Only tailor for the Word document, not for website display
+        tailored_projects = []
+        for proj in deduped_projects:
+            tailored = tailor_project_with_gpt(proj, work_description)
+            # Ensure the tailored project is not empty and not hallucinated (basic check: must contain some of the original text)
+            if proj[:30].strip() in tailored or proj.split(':')[0].strip() in tailored:
+                tailored_projects.append(tailored)
+            else:
+                # Fallback: use the original if GPT output is not faithful
+                tailored_projects.append(proj)
 
         def generate_qualification_paragraphs_manual_themes(bio_text, relevant_projects, user_description, user_themes, use_gpt=True):
             if not use_gpt:
@@ -891,14 +900,17 @@ Return only the tailored project description, no commentary or extra text.
                         {"role": "user", "content": prompt}
                     ],
                     temperature=0.2,
-                    max_tokens=8000  # Increased from 3000 to handle comprehensive qualifications
+                    max_tokens=8000
                 )
                 return response.choices[0].message.content.strip()
             except Exception as e:
                 return f"Unable to generate qualifications due to API error: {str(e)}"
         qualifications = generate_qualification_paragraphs_manual_themes(bio_text, tailored_projects, work_description, user_themes, use_gpt_processing)
+        # For website display, use the original (deduped) relevant projects, not tailored
         st.session_state['cv_qualifications'] = qualifications
-        st.session_state['cv_relevant_projects'] = tailored_projects
+        st.session_state['cv_relevant_projects'] = deduped_projects
+        st.session_state['cv_tailored_projects'] = tailored_projects  # Save tailored for Word only
+        st.session_state['cv_uploaded_file_bytes'] = file_content  # Save file for second download button
         st.session_state['cv_generated'] = True
         st.success("✅ AI Analysis Complete!")
         st.rerun()
@@ -912,6 +924,7 @@ Return only the tailored project description, no commentary or extra text.
         st.markdown("### 🎯 Key Qualifications")
         st.text_area("Key Qualification Paragraphs", st.session_state.get('cv_qualifications', ''), height=220, disabled=False, key="qualifications_display")
         
+        # Show only the original (untailored) relevant projects on the website
         relevant_projects = st.session_state.get('cv_relevant_projects', [])
         if relevant_projects:
             st.markdown(f"### 📁 Relevant Project Experience")
@@ -920,14 +933,13 @@ Return only the tailored project description, no commentary or extra text.
         else:
             st.info("No directly relevant projects identified.")
         
-        # --- IMPROVED: Generate Word document with exact formatting ---
+        # --- IMPROVED: Generate Word document with tailored projects ---
         if uploaded_file and uploaded_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
             qualifications = st.session_state.get('cv_qualifications', '')
-            relevant_projects = st.session_state.get('cv_relevant_projects', [])
-            
+            # Use tailored projects for the Word document
+            tailored_projects = st.session_state.get('cv_tailored_projects', [])
             try:
-                buffer = generate_improved_word_document(uploaded_file, qualifications, relevant_projects)
-            
+                buffer = generate_improved_word_document(uploaded_file, qualifications, tailored_projects)
                 st.download_button(
                     label="📄 Download as Word Document",
                     data=buffer,
@@ -935,6 +947,19 @@ Return only the tailored project description, no commentary or extra text.
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     help="Download the CV with GPT-generated qualifications and projects, maintaining original formatting"
                 )
+                # --- NEW: Download button for original project descriptions ---
+                orig_file_bytes = st.session_state.get('cv_uploaded_file_bytes', None)
+                if orig_file_bytes:
+                    from io import BytesIO
+                    orig_file = BytesIO(orig_file_bytes)
+                    orig_buffer = generate_improved_word_document(orig_file, qualifications, relevant_projects)
+                    st.download_button(
+                        label="📄 Download as Word Document (Original Project Descriptions)",
+                        data=orig_buffer,
+                        file_name="KM_CV_Qualifications_ORIG_PROJECTS.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        help="Download the CV with original project descriptions (no tailoring), maintaining original formatting"
+                    )
             except Exception as e:
                 st.error(f"Error generating Word document: {str(e)}")
                 st.info("Please try uploading the file again or contact support if the issue persists.")

@@ -63,7 +63,7 @@ def generate_improved_word_document(uploaded_file, qualifications_text, relevant
                     # Add text with proper formatting
                     run = new_para.add_run(qual_para.strip())
                     run.font.name = 'Century Gothic'
-                    run.font.size = Pt(11)
+                    run.font.size = Pt(10)
                     
                     # Apply US Body Text style if available
                     try:
@@ -148,19 +148,19 @@ def generate_improved_word_document(uploaded_file, qualifications_text, relevant
                             title_run = paragraph.add_run(title_part)
                             title_run.bold = True
                             title_run.font.name = 'Century Gothic'
-                            title_run.font.size = Pt(11)
+                            title_run.font.size = Pt(10)
                             
                             # Add rest of project description including colon (NOT bold)
                             rest_run = paragraph.add_run(rest_part)
                             rest_run.bold = False  # Explicitly set to not bold
                             rest_run.font.name = 'Century Gothic'
-                            rest_run.font.size = Pt(11)
+                            rest_run.font.size = Pt(10)
                         else:
                             # No colon found, treat entire text as title (bold)
                             title_run = paragraph.add_run(project)
                             title_run.bold = True
                             title_run.font.name = 'Century Gothic'
-                            title_run.font.size = Pt(11)
+                            title_run.font.size = Pt(10)
                         
                         # Apply US Body Text style if available
                         try:

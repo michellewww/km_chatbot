@@ -840,11 +840,16 @@ Only include a theme if it is supported by BOTH the job description and the CV.
 
         # --- Tailor each project using GPT, one at a time (or in small batches if needed) ---
         def tailor_project_with_gpt(original_project, job_description):
+            # Extract the original title to preserve it
+            original_title = get_project_title(original_project)
+            
             tailor_prompt = f"""
 You are an expert proposal writer. Here is a project description from a CV and a job/work description. 
 Your task is to tailor the project description to the job/work description, keeping as much of the original text and detail as possible, 
 but making it directly relevant to the job/work description. The tailored description should be between 150 and 200 words. 
 Do NOT invent facts, but you may rephrase, reorganize, or clarify as needed for clarity and relevance.
+
+CRITICAL REQUIREMENT: You MUST preserve the exact project title (everything before the colon ":"). The title should remain exactly as: "{original_title}"
 
 JOB/WORK DESCRIPTION:
 {job_description}
@@ -852,7 +857,7 @@ JOB/WORK DESCRIPTION:
 ORIGINAL PROJECT DESCRIPTION:
 {original_project}
 
-Return only the tailored project description, no commentary or extra text.
+Return only the tailored project description with the preserved title, no commentary or extra text.
 """
             try:
                 response = openai_client.chat.completions.create(
@@ -938,8 +943,30 @@ Return only the tailored project description, no commentary or extra text.
             qualifications = st.session_state.get('cv_qualifications', '')
             # Use tailored projects for the Word document
             tailored_projects = st.session_state.get('cv_tailored_projects', [])
+            
+            # Validate that each tailored project title matches an original project title
+            original_projects = st.session_state.get('cv_relevant_projects', [])
+            original_titles = [get_project_title(proj) for proj in original_projects]
+            
+            validated_tailored_projects = []
+            excluded_projects = []
+            
+            for tailored_proj in tailored_projects:
+                tailored_title = get_project_title(tailored_proj)
+                if tailored_title in original_titles:
+                    validated_tailored_projects.append(tailored_proj)
+                else:
+                    excluded_projects.append(tailored_title)
+            
+            if excluded_projects:
+                st.warning(f"Excluded {len(excluded_projects)} tailored projects from Word document due to title mismatch:")
+                for excluded_title in excluded_projects:
+                    st.write(f"  - {excluded_title}")
+            
+            st.info(f"Using {len(validated_tailored_projects)} validated projects for Word document")
+            
             try:
-                buffer = generate_improved_word_document(uploaded_file, qualifications, tailored_projects)
+                buffer = generate_improved_word_document(uploaded_file, qualifications, validated_tailored_projects)
                 st.download_button(
                     label="📄 Download as Word Document",
                     data=buffer,

@@ -509,6 +509,14 @@ def generate_qualification_paragraphs_with_gpt(bio_text: str, relevant_projects:
         st.error(f"Error calling OpenAI API for qualification generation: {e}")
         return f"Unable to generate qualifications due to API error: {str(e)}"
 
+def get_project_title(proj):
+    """Extract project title from project description (everything before first colon or first line)"""
+    # Use text before first colon or first line as title
+    if ':' in proj:
+        return proj.split(':')[0].strip()
+    else:
+        return proj.split('\n')[0].strip()
+
 # ---- MOVE: Button Mode Selection to sidebar top ----
 if 'mode' not in st.session_state:
     st.session_state['mode'] = 'cv'  # Default to search
@@ -808,12 +816,6 @@ Only include a theme if it is supported by BOTH the job description and the CV.
 
         # --- Deduplicate by project title ---
         st.info(f"Before deduplication: {len(relevant_projects)} projects")
-        def get_project_title(proj):
-            # Use text before first colon or first line as title
-            if ':' in proj:
-                return proj.split(':')[0].strip()
-            else:
-                return proj.split('\n')[0].strip()
         unique_projects = {}
         duplicates_found = []
         for proj in relevant_projects:
